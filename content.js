@@ -425,9 +425,13 @@
   });
 
   // Run scan
+  // Auto-scan disabled to prevent performance issues
+  // Scan must be triggered manually via popup
+  /*
   try {
     runScan();
   } catch (err) {
     console.error("[Nexus] Content scan error:", err);
   }
+  */
 })();

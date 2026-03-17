@@ -6,11 +6,14 @@
 importScripts("scanner/patterns.js", "scanner/finding.js", "scanner/path-list.js");
 
 // ── State ──
+function createEmptyTabFindings(url = "", status = "idle") {
+  return { content: [], network: [], jsFiles: [], paths: [], url, status };
+}
 
 async function getTabFindings(tabId) {
   const key = `tab_${tabId}`;
   const data = await chrome.storage.session.get(key);
-  return data[key] || { content: [], network: [], jsFiles: [], paths: [], url: "" };
+  return data[key] || createEmptyTabFindings();
 }
 
 async function saveTabFindings(tabId, findings) {
@@ -23,6 +26,7 @@ async function mergeFindings(tabId, category, newFindings, url) {
   const existing = await getTabFindings(tabId);
   existing[category] = newFindings;
   if (url) existing.url = url;
+  if (category === "content" || category === "paths") existing.status = "complete";
   await saveTabFindings(tabId, existing);
 }
 
@@ -404,24 +408,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           findings: sortFindings(all),
           summary: getSeverityCounts(all),
-          url: tabData.url
+          url: tabData.url,
+          status: tabData.status || "idle"
         });
       });
       return true; // MUST return true for async sendResponse
     }
-    sendResponse({ findings: [], summary: {}, url: "" });
+    sendResponse({ findings: [], summary: {}, url: "", status: "idle" });
     return false;
   }
 
   if (message.type === "REQUEST_SCAN") {
     if (message.tabId) {
-      saveTabFindings(message.tabId, { content: [], network: [], jsFiles: [], paths: [], url: "" });
-      chrome.tabs.sendMessage(message.tabId, { type: "REQUEST_RESCAN" }).catch(() => {
-        // Content script not available, re-inject via scripting API
+      const tabId = message.tabId;
+      saveTabFindings(tabId, createEmptyTabFindings("", "scanning"));
+
+      const triggerRescan = () => chrome.tabs.sendMessage(tabId, { type: "REQUEST_RESCAN" });
+
+      triggerRescan().catch(() => {
+        // Content script not available, re-inject and trigger scan once injected.
         chrome.scripting.executeScript({
-          target: { tabId: message.tabId },
+          target: { tabId },
           files: ["scanner/patterns.js", "scanner/finding.js", "content.js"]
-        }).catch(() => {});
+        }).then(() => triggerRescan()).catch((err) => {
+          console.warn("[Nexus] Unable to start scan for tab:", tabId, err);
+          saveTabFindings(tabId, createEmptyTabFindings("", "idle"));
+        });
       });
     }
     sendResponse({ status: "ok" });
@@ -450,7 +462,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
         // Only clear findings if navigating to a different URL
         if (currentUrl && storedUrl && currentUrl !== storedUrl) {
           // Navigating to new page - clear all findings
-          saveTabFindings(tabId, { content: [], network: [], jsFiles: [], paths: [], url: currentUrl });
+          saveTabFindings(tabId, createEmptyTabFindings(currentUrl, "idle"));
         }
         // For same-page reloads: keep findings visible, clear only paths
         // New content/network/JS findings will merge in as they arrive

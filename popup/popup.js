@@ -9,7 +9,6 @@
   let allFindings = [];
   let currentUrl = "";
   let activeSeverityFilter = null;
-  let lastFindingsHash = "";
   let expandedIds = new Set();
 
   // Category icon map (Font Awesome classes)
@@ -62,6 +61,8 @@
   const exportMenu = document.getElementById("export-menu");
   const btnExportJson = document.getElementById("btn-export-json");
   const btnExportHtml = document.getElementById("btn-export-html");
+  const btnStartScan = document.getElementById("btn-start-scan");
+  const startScanState = document.getElementById("start-scan-state");
 
   const severityCounts = {
     critical: document.getElementById("count-critical"),
@@ -78,8 +79,8 @@
 
     targetUrlText.textContent = tab.url || "Unknown";
     
-    // Show scan status initially
-    scanStatus.style.display = "flex";
+    // Initial state: scan status hidden
+    scanStatus.style.display = "none";
     
     // Load existing findings immediately
     loadFindings(tab.id);
@@ -90,6 +91,7 @@
 
     // Event listeners
     btnRescan.addEventListener("click", () => rescan(tab.id));
+    if (btnStartScan) btnStartScan.addEventListener("click", () => rescan(tab.id));
     btnExportToggle.addEventListener("click", (e) => {
       e.stopPropagation();
       exportMenu.classList.toggle("show");
@@ -127,16 +129,8 @@
       if (chrome.runtime.lastError || !response) return;
 
       const newFindings = response.findings || [];
-      const newHash = newFindings.map(f => f.id).join(",");
-
-      // Skip re-render if findings haven't changed
-      if (newHash === lastFindingsHash) {
-        // Still hide scan status if we have findings
-        if (newFindings.length > 0) scanStatus.style.display = "none";
-        return;
-      }
+      const status = response.status || "idle";
       
-      lastFindingsHash = newHash;
       allFindings = newFindings;
       currentUrl = response.url || "";
 
@@ -149,9 +143,34 @@
       renderSiteProfile();
       renderFindings();
       
-      // Hide scan status once we have findings
+      // Visibility Logic based on Status & Findings
       if (newFindings.length > 0) {
-        scanStatus.style.display = "none";
+        // Has findings: Show list, hide prompts
+        if (startScanState) startScanState.style.display = "none";
+        emptyState.style.display = "none";
+        scanStatus.style.display = (status === "scanning") ? "flex" : "none";
+        findingsList.style.display = "block";
+      } else {
+        // No findings: Handle states
+        findingsList.style.display = "none";
+        const profileEl = document.getElementById("site-profile");
+        if (profileEl) profileEl.style.display = "none";
+
+        if (status === "scanning") {
+          if (startScanState) startScanState.style.display = "none";
+          emptyState.style.display = "none";
+          scanStatus.style.display = "flex";
+        } else if (status === "complete") {
+          // Finished scan, found nothing
+          if (startScanState) startScanState.style.display = "none";
+          emptyState.style.display = "flex";
+          scanStatus.style.display = "none";
+        } else {
+          // Idle / Not Scanned
+          if (startScanState) startScanState.style.display = "flex";
+          emptyState.style.display = "none";
+          scanStatus.style.display = "none";
+        }
       }
     });
   }
@@ -424,14 +443,6 @@
     const filtered = getFilteredFindings();
     findingsList.innerHTML = "";
 
-    if (filtered.length === 0 && allFindings.length === 0) {
-      emptyState.style.display = "flex";
-      findingsList.style.display = "none";
-    } else {
-      emptyState.style.display = "none";
-      findingsList.style.display = "block";
-    }
-
     // Group by category
     const grouped = {};
     filtered.forEach(f => {
@@ -544,13 +555,17 @@
   function rescan(tabId) {
     btnRescan.disabled = true;
     btnRescan.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning...';
+    if (btnStartScan) btnStartScan.disabled = true;
+    if (startScanState) startScanState.style.display = "none";
+    emptyState.style.display = "none";
+    findingsList.style.display = "none";
     scanStatus.style.display = "flex";
-    lastFindingsHash = "";
     expandedIds.clear();
 
     chrome.runtime.sendMessage({ type: "REQUEST_SCAN", tabId }, () => {
       setTimeout(() => {
         btnRescan.disabled = false;
+        if (btnStartScan) btnStartScan.disabled = false;
         btnRescan.innerHTML = '<i class="fa-solid fa-rotate"></i> Rescan';
         loadFindings(tabId);
       }, 2000);
@@ -560,7 +575,7 @@
   function getReportData() {
     return {
       tool: "Nexus Scanner",
-      version: "1.0.0",
+      version: "1.0.1",
       url: currentUrl,
       scanDate: new Date().toISOString(),
       summary: {

@@ -148,18 +148,28 @@
         <!-- Findings will be rendered here -->
       </div>
 
-      <!-- Empty State -->
+      <!-- Empty State (No Findings) -->
       <div class="empty-state" id="empty-state" style="display:none;">
         <i class="fa-solid fa-circle-check"></i>
         <p>No findings detected</p>
         <span>This page appears clean</span>
       </div>
 
+      <!-- Start Scan State -->
+      <div class="empty-state" id="start-scan-state" style="display:none;">
+        <i class="fa-solid fa-radar"></i>
+        <p>Passive Scan Ready</p>
+        <span>Click to scan this page</span>
+        <button id="btn-start-scan" class="btn btn-primary" style="margin-top: 15px;">
+          <i class="fa-solid fa-play"></i> Start Scan
+        </button>
+      </div>
+
     </div>
 
     <!-- Footer -->
     <footer class="footer">
-      <span><i class="fa-solid fa-eye"></i> Nexus Scanner v1.0</span>
+      <span><i class="fa-solid fa-eye"></i> Nexus Scanner v1.0.1</span>
       <span id="finding-total">0 findings</span>
     </footer>
   </div>
