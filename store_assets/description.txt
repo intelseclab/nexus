@@ -1,0 +1,44 @@
+Short Description (Up to 132 chars):
+Web security reconnaissance platform. Detects exposed API keys, sensitive tokens, configurations, and tech stack as you browse.
+
+Long Description:
+Nexus is a professional-grade web reconnaissance tool designed for pentesters and bug bounty hunters. It passively analyzes web traffic and page content to detect security risks without sending malicious payloads.
+
+KEY FEATURES:
+
+🔍 Passive Vulnerability Scanning
+Automatically detects 70+ sensitive patterns including:
+- Cloud API Keys (AWS, Google, Azure)
+- SaaS Tokens (Stripe, Slack, Discord, OpenAI)
+- Exposed Configuration Files (.env, config.js)
+- Database Connection Strings
+
+🛠️ Technology Fingerprinting
+Identifies the underlying technology stack of target websites:
+- Frontend Frameworks (React, Vue, Angular, Svelte)
+- CMS & Platforms (WordPress, Shopify, Magento)
+- Analytics & Marketing Tools
+- Server Headers & Security Misconfigurations
+
+📂 Sensitive Path Detection
+Probes for common sensitive endpoints that are often exposed:
+- Admin Panels & Dashboards
+- Backup Files (.zip, .bak, .sql)
+- Version Control (.git, .svn)
+- Server Status Pages
+
+📊 Professional Reporting
+- Instant visual feedback via the extension badge
+- Detailed finding cards with severity classification (Critical, High, Medium, Low)
+- Export findings to JSON or HTML reports for client deliverables
+
+PRIVACY & SECURITY:
+Nexus runs entirely within your browser. No data is sent to external servers. All scanning is performed locally using JavaScript.
+
+TARGET AUDIENCE:
+- Penetration Testers
+- Bug Bounty Hunters
+- Security Engineers
+- Web Developers
+
+Version 1.0.0 | IntelSecLab

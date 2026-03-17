@@ -1,0 +1,34 @@
+## Single Purpose
+Web security reconnaissance and passive vulnerability detection.
+
+## Permission Justifications
+
+### activeTab
+Used to scan the current tab's DOM and scripts for exposed API keys and sensitive tokens only when the user interacts with the extension.
+
+### scripting
+Required to inject the passive scanner into the page context to detect client-side technologies and misconfigurations.
+
+### webRequest
+Used to analyze HTTP response headers (e.g., CSP, HSTS, Server) to identify security misconfigurations and technology stack.
+
+### storage
+Used to temporarily store findings locally within the browser session so they persist during page navigation. No data is sent externally.
+
+### Host Permission
+Required to allow the user to perform security reconnaissance on any website they visit and choose to test.
+
+## Remote Code
+No, I am not using Remote code.
+
+## Data Usage
+(Leave ALL checkboxes UNCHECKED. You do not collect data.)
+
+## Certifications
+(Check ALL three boxes):
+[x] I do not sell or transfer user data...
+[x] I do not use or transfer user data for purposes...
+[x] I do not use or transfer user data to determine creditworthiness...
+
+## Privacy Policy URL
+https://github.com/intelseclab/nexus/blob/main/PRIVACY.md
