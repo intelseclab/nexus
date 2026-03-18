@@ -122,6 +122,7 @@
       let matchCount = 0;
       while ((match = regex.exec(text)) !== null && matchCount < 50) {
         matchCount++;
+        if (match[0].length === 0) { regex.lastIndex++; continue; }
         const matchedText = match[1] || match[0];
         if (p.falsePositiveFilter && p.falsePositiveFilter.test(matchedText)) continue;
         const start = Math.max(0, match.index - 50);
@@ -314,7 +315,7 @@
     const findings = [];
     const sensitiveGlobals = ["__APP_CONFIG__", "__CONFIG__", "__ENV__", "__RUNTIME_CONFIG__",
       "APP_CONFIG", "CONFIG", "__INITIAL_STATE__", "__PRELOADED_STATE__",
-      "__APP_INITIAL_STATE__", "GLOBAL_CONFIG", "window.__config"];
+      "__APP_INITIAL_STATE__", "GLOBAL_CONFIG", "__config"];
     for (const name of sensitiveGlobals) {
       try {
         const val = window[name];
@@ -399,20 +400,10 @@
       chrome.runtime.sendMessage({
         type: "CONTENT_FINDINGS",
         findings: uniqueFindings,
-        url: pageUrl
+        url: pageUrl,
+        jsFileUrls: externalScriptUrls.length > 0 ? externalScriptUrls : null
       });
     } catch (e) { /* extension context invalidated */ }
-
-    // Send external script URLs for background to scan
-    if (externalScriptUrls.length > 0) {
-      try {
-        chrome.runtime.sendMessage({
-          type: "SCAN_JS_FILES",
-          urls: externalScriptUrls,
-          origin: pageOrigin
-        });
-      } catch (e) { /* extension context invalidated */ }
-    }
   }
 
   // Listen for re-scan requests
@@ -421,7 +412,7 @@
       runScan();
       sendResponse({ status: "ok" });
     }
-    return true;
+    return false;
   });
 
   // Run scan

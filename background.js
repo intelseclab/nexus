@@ -7,7 +7,7 @@ importScripts("scanner/patterns.js", "scanner/finding.js", "scanner/path-list.js
 
 // ── State ──
 function createEmptyTabFindings(url = "", status = "idle") {
-  return { content: [], network: [], jsFiles: [], paths: [], url, status };
+  return { content: [], network: [], jsFiles: [], paths: [], url, status, pendingScans: 0 };
 }
 
 async function getTabFindings(tabId) {
@@ -26,7 +26,11 @@ async function mergeFindings(tabId, category, newFindings, url) {
   const existing = await getTabFindings(tabId);
   existing[category] = newFindings;
   if (url) existing.url = url;
-  if (category === "content" || category === "paths") existing.status = "complete";
+  // Decrement pending scan counter; mark complete only when all phases done
+  if (existing.pendingScans > 0) existing.pendingScans--;
+  if (existing.pendingScans <= 0 && existing.status === "scanning") {
+    existing.status = "complete";
+  }
   await saveTabFindings(tabId, existing);
 }
 
@@ -63,12 +67,17 @@ function updateBadge(tabId, tabData) {
   chrome.action.setBadgeTextColor({ color: "#FFFFFF", tabId });
 }
 
-// ── Header Scanner ──
+// ── Header Cache ──
+// Cache headers per tab so we can scan them when the user requests a scan.
+const cachedHeaders = new Map();
 
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (details.type === "main_frame") {
-      scanHeaders(details.tabId, details.responseHeaders || [], details.url);
+      cachedHeaders.set(details.tabId, {
+        headers: details.responseHeaders || [],
+        url: details.url
+      });
     }
   },
   { urls: ["<all_urls>"] },
@@ -197,7 +206,7 @@ function scanHeaders(tabId, headers, url) {
       }));
     }
 
-    // Cookie with __Secure- or __Host- prefix check
+    // Cookie with __Secure- prefix check
     if (cookieName.startsWith("__Secure-") && !flags.includes("secure")) {
       findings.push(createFinding({
         severity: "high", category: "cookie",
@@ -206,7 +215,74 @@ function scanHeaders(tabId, headers, url) {
         match: cookieName, location: url
       }));
     }
+
+    // Cookie with __Host- prefix check (requires Secure, Path=/, no Domain)
+    if (cookieName.startsWith("__Host-")) {
+      const hostIssues = [];
+      if (!flags.includes("secure")) hostIssues.push("Secure");
+      if (!flags.includes("path=/")) hostIssues.push("Path=/");
+      if (/;\s*domain\s*=/i.test(cookie)) hostIssues.push("must not have Domain");
+      if (hostIssues.length > 0) {
+        findings.push(createFinding({
+          severity: "high", category: "cookie",
+          title: `__Host- Cookie Violation`,
+          description: `${cookieName} uses __Host- prefix but violates requirements: ${hostIssues.join(", ")}.`,
+          match: cookieName, location: url
+        }));
+      }
+    }
   });
+
+  // ── Header-based Technology Fingerprinting ──
+  const techFingerprints = [
+    // PaaS & Hosting
+    { check: () => headerMap["server"]?.toLowerCase().includes("github.com") || headerMap["x-github-request-id"], name: "GitHub Pages", description: "GitHub Pages hosting detected via headers." },
+    { check: () => headerMap["x-vercel-id"] || headerMap["server"]?.toLowerCase() === "vercel", name: "Vercel", description: "Vercel hosting detected via headers." },
+    { check: () => headerMap["x-netlify-request-id"] || headerMap["server"]?.toLowerCase() === "netlify", name: "Netlify", description: "Netlify hosting detected via headers." },
+    { check: () => headerMap["x-amz-cf-id"] || headerMap["x-amz-cf-pop"], name: "Amazon CloudFront", description: "AWS CloudFront CDN detected via headers." },
+    { check: () => headerMap["x-azure-ref"], name: "Azure", description: "Azure hosting detected via headers." },
+    { check: () => headerMap["x-goog-generation"] || headerMap["x-guploader-uploadid"], name: "Google Cloud Storage", description: "Google Cloud Storage detected via headers." },
+    { check: () => /fly-request-id|fly\.io/i.test(headerMap["server"] || ""), name: "Fly.io", description: "Fly.io hosting detected via headers." },
+    { check: () => headerMap["x-render-origin-server"], name: "Render", description: "Render hosting detected via headers." },
+    // CDN
+    { check: () => headerMap["x-fastly-request-id"] || headerMap["x-served-by"]?.includes("cache-"), name: "Fastly", description: "Fastly CDN detected via headers." },
+    { check: () => headerMap["cf-ray"] || headerMap["cf-cache-status"], name: "Cloudflare", description: "Cloudflare CDN detected via headers." },
+    { check: () => headerMap["x-cdn"]?.toLowerCase().includes("akamai") || headerMap["x-akamai-transformed"], name: "Akamai", description: "Akamai CDN detected via headers." },
+    { check: () => headerMap["x-sucuri-id"] || headerMap["x-sucuri-cache"], name: "Sucuri", description: "Sucuri WAF/CDN detected via headers." },
+    // Caching / Proxy
+    { check: () => headerMap["x-varnish"] || (headerMap["via"] && /varnish/i.test(headerMap["via"])), name: "Varnish", description: "Varnish caching proxy detected via headers.", extra: () => { const via = headerMap["via"] || ""; const m = via.match(/varnish[\/\s]*([0-9.]+)/i) || headerMap["x-varnish"]?.match(/([0-9.]+)/); return m ? m[1] : null; } },
+    // Web servers
+    { check: () => /^nginx/i.test(headerMap["server"] || ""), name: "Nginx", description: "Nginx web server detected.", extra: () => { const m = (headerMap["server"] || "").match(/nginx[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
+    { check: () => /^apache/i.test(headerMap["server"] || ""), name: "Apache", description: "Apache web server detected.", extra: () => { const m = (headerMap["server"] || "").match(/apache[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
+    { check: () => /^LiteSpeed/i.test(headerMap["server"] || ""), name: "LiteSpeed", description: "LiteSpeed web server detected." },
+    { check: () => /^openresty/i.test(headerMap["server"] || ""), name: "OpenResty", description: "OpenResty (Nginx+Lua) detected." },
+    { check: () => /Microsoft-IIS/i.test(headerMap["server"] || ""), name: "IIS", description: "Microsoft IIS detected.", extra: () => { const m = (headerMap["server"] || "").match(/IIS[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
+    // Languages & Frameworks (via headers)
+    { check: () => /^PHP/i.test(headerMap["x-powered-by"] || ""), name: "PHP", description: "PHP detected via X-Powered-By header.", extra: () => { const m = (headerMap["x-powered-by"] || "").match(/PHP[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
+    { check: () => /express/i.test(headerMap["x-powered-by"] || ""), name: "Express", description: "Express.js framework detected via headers." },
+    { check: () => /^next\.js/i.test(headerMap["x-powered-by"] || ""), name: "Next.js", description: "Next.js detected via X-Powered-By header." },
+    { check: () => headerMap["x-drupal-cache"] || headerMap["x-drupal-dynamic-cache"], name: "Drupal", description: "Drupal CMS detected via headers." },
+    // Security
+    { check: () => headerMap["strict-transport-security"], name: "HSTS", description: "HTTP Strict Transport Security enabled." },
+  ];
+
+  for (const fp of techFingerprints) {
+    try {
+      if (fp.check()) {
+        let name = fp.name;
+        if (fp.extra) {
+          const version = fp.extra();
+          if (version) name += ` ${version}`;
+        }
+        findings.push(createFinding({
+          severity: "info", category: "technology",
+          title: name,
+          description: fp.description,
+          match: name, location: url
+        }));
+      }
+    } catch (e) { /* skip */ }
+  }
 
   // Deprecated/informational headers
   if (headerMap["x-xss-protection"]) {
@@ -268,6 +344,7 @@ async function scanJsFiles(tabId, urls) {
           let matchCount = 0;
           while ((match = regex.exec(text)) !== null && matchCount < 30) {
             matchCount++;
+            if (match[0].length === 0) { regex.lastIndex++; continue; }
             const matchedText = match[1] || match[0];
             if (p.falsePositiveFilter && p.falsePositiveFilter.test(matchedText)) continue;
 
@@ -288,9 +365,7 @@ async function scanJsFiles(tabId, urls) {
     }
   }
 
-  if (findings.length > 0) {
-    mergeFindings(tabId, "jsFiles", deduplicateFindings(findings));
-  }
+  mergeFindings(tabId, "jsFiles", deduplicateFindings(findings));
 }
 
 // ── Path Checker ──
@@ -298,6 +373,7 @@ async function scanJsFiles(tabId, urls) {
 async function probePaths(tabId, origin) {
   const findings = [];
   const delay = ms => new Promise(r => setTimeout(r, ms));
+  let currentDelay = 200;
 
   // Detect if the site is an SPA (returns 200 for everything)
   let isSpa = false;
@@ -317,7 +393,10 @@ async function probePaths(tabId, origin) {
     }
   } catch (e) { /* proceed without SPA detection */ }
 
-  for (const entry of SENSITIVE_PATHS) {
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
+  for (let i = 0; i < SENSITIVE_PATHS.length; i++) {
+    const entry = SENSITIVE_PATHS[i];
     try {
       const url = origin + entry.path;
       const controller = new AbortController();
@@ -328,6 +407,21 @@ async function probePaths(tabId, origin) {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
+
+      // Back off on rate limiting and retry the same path (max 3 retries)
+      if (response.status === 429) {
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          currentDelay = Math.min(currentDelay * 2, 5000);
+          await delay(currentDelay);
+          i--; // retry same path
+          continue;
+        }
+        // Max retries exceeded, skip this path
+        retryCount = 0;
+        continue;
+      }
+      retryCount = 0;
 
       if (response.status === 200) {
         const contentType = response.headers.get("content-type") || "";
@@ -363,15 +457,13 @@ async function probePaths(tabId, origin) {
         }));
       }
 
-      await delay(200);
+      await delay(currentDelay);
     } catch (err) {
       // Timeout or network error
     }
   }
 
-  if (findings.length > 0) {
-    mergeFindings(tabId, "paths", deduplicateFindings(findings));
-  }
+  mergeFindings(tabId, "paths", deduplicateFindings(findings));
 }
 
 // ── Message Handling ──
@@ -381,21 +473,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "CONTENT_FINDINGS") {
     if (tabId) {
-      mergeFindings(tabId, "content", message.findings, message.url);
-      if (sender.tab?.url) {
-        try {
-          const origin = new URL(sender.tab.url).origin;
-          probePaths(tabId, origin);
-        } catch (e) { /* invalid URL */ }
-      }
-    }
-    sendResponse({ status: "ok" });
-    return false;
-  }
+      // Calculate extra pending phases: paths + jsFiles (if any)
+      const hasJsFiles = message.jsFileUrls && message.jsFileUrls.length > 0;
+      const extraPending = 1 + (hasJsFiles ? 1 : 0); // +1 paths, +1 jsFiles if present
 
-  if (message.type === "SCAN_JS_FILES") {
-    if (tabId && message.urls) {
-      scanJsFiles(tabId, message.urls);
+      getTabFindings(tabId).then(existing => {
+        existing.pendingScans = (existing.pendingScans || 0) + extraPending;
+        saveTabFindings(tabId, existing).then(() => {
+          // Merge content findings (decrements 1 pending)
+          mergeFindings(tabId, "content", message.findings, message.url).then(() => {
+            // Start JS file scanning sequentially after content save
+            if (hasJsFiles) {
+              scanJsFiles(tabId, message.jsFileUrls);
+            }
+            // Start path probing
+            if (sender.tab?.url) {
+              try {
+                const origin = new URL(sender.tab.url).origin;
+                probePaths(tabId, origin);
+              } catch (e) {
+                mergeFindings(tabId, "paths", []);
+              }
+            } else {
+              mergeFindings(tabId, "paths", []);
+            }
+          });
+        });
+      });
     }
     sendResponse({ status: "ok" });
     return false;
@@ -404,7 +508,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GET_FINDINGS") {
     if (message.tabId) {
       getTabFindings(message.tabId).then(tabData => {
-        const all = getAllFindings(tabData);
+        const all = deduplicateFindings(getAllFindings(tabData));
         sendResponse({
           findings: sortFindings(all),
           summary: getSeverityCounts(all),
@@ -421,18 +525,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "REQUEST_SCAN") {
     if (message.tabId) {
       const tabId = message.tabId;
-      saveTabFindings(tabId, createEmptyTabFindings("", "scanning"));
+      // pendingScans: 2 = content scan + header scan (paths and jsFiles add their own later)
+      const initial = createEmptyTabFindings("", "scanning");
+      initial.pendingScans = 2;
+      saveTabFindings(tabId, initial).then(() => {
+        // Scan cached headers for this tab (must await initial save first)
+        const cached = cachedHeaders.get(tabId);
+        if (cached) {
+          scanHeaders(tabId, cached.headers, cached.url);
+        } else {
+          mergeFindings(tabId, "network", []);
+        }
 
-      const triggerRescan = () => chrome.tabs.sendMessage(tabId, { type: "REQUEST_RESCAN" });
+        const triggerRescan = () => chrome.tabs.sendMessage(tabId, { type: "REQUEST_RESCAN" });
 
-      triggerRescan().catch(() => {
-        // Content script not available, re-inject and trigger scan once injected.
-        chrome.scripting.executeScript({
-          target: { tabId },
-          files: ["scanner/patterns.js", "scanner/finding.js", "content.js"]
-        }).then(() => triggerRescan()).catch((err) => {
-          console.warn("[Nexus] Unable to start scan for tab:", tabId, err);
-          saveTabFindings(tabId, createEmptyTabFindings("", "idle"));
+        triggerRescan().catch(() => {
+          chrome.scripting.executeScript({
+            target: { tabId },
+            files: ["scanner/patterns.js", "scanner/finding.js", "content.js"]
+          }).then(() => triggerRescan()).catch((err) => {
+            console.warn("[Nexus] Unable to start scan for tab:", tabId, err);
+            saveTabFindings(tabId, createEmptyTabFindings("", "idle"));
+          });
         });
       });
     }
@@ -447,13 +561,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(`tab_${tabId}`);
+  cachedHeaders.delete(tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
-    // Get current tab info
     chrome.tabs.get(tabId, (tab) => {
-      if (!tab) return;
+      if (chrome.runtime.lastError || !tab) return;
       
       getTabFindings(tabId).then(data => {
         const currentUrl = tab.url;

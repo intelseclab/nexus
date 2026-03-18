@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nexus",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "IntelSecLab",
   "description": "Passive web security reconnaissance platform. Detects exposed API keys, tokens, configs, and tech stack for pentesters.",
   "homepage_url": "https://github.com/intelseclab/nexus",

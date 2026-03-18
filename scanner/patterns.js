@@ -136,7 +136,7 @@ const SCAN_PATTERNS = {
 
   // ── Technology Fingerprinting ──
   technology: [
-    { name: "WordPress", pattern: /\/wp-content\/|\/wp-includes\/|wp-json/g, severity: "info", category: "technology", description: "WordPress detected." },
+    { name: "WordPress", pattern: /(?:=['"]\/wp-content\/|=['"]\/wp-includes\/|<meta[^>]+name=['"]generator['"][^>]+WordPress|wp-json\/wp\/v2)/g, severity: "info", category: "technology", description: "WordPress detected." },
     { name: "React", pattern: /\breact(?:\.production|\.development|DOM)\b|_reactRoot|__REACT_DEVTOOLS/g, severity: "info", category: "technology", description: "React.js detected." },
     { name: "Angular", pattern: /ng-version=["'][0-9]+|angular(?:\.min)?\.js|ng-app=|ng-controller=/g, severity: "info", category: "technology", description: "Angular detected." },
     { name: "Vue.js", pattern: /__vue__|Vue\.(?:component|use|mixin)|v-bind:|v-on:|v-if=/g, severity: "info", category: "technology", description: "Vue.js detected." },
@@ -149,7 +149,7 @@ const SCAN_PATTERNS = {
     { name: "Ruby on Rails", pattern: /csrf-token.*authenticity_token|turbolinks|rails-ujs/g, severity: "info", category: "technology", description: "Ruby on Rails detected." },
     { name: "ASP.NET", pattern: /__VIEWSTATE|__EVENTVALIDATION|asp\.net|aspnet/gi, severity: "info", category: "technology", description: "ASP.NET detected." },
     { name: "Spring Framework", pattern: /jsessionid|spring-security|springframework/gi, severity: "info", category: "technology", description: "Spring Framework detected." },
-    { name: "Cloudflare", pattern: /__cf_bm|cf-ray|cloudflare/gi, severity: "info", category: "technology", description: "Cloudflare detected." },
+    { name: "Cloudflare", pattern: /__cf_bm|cf-ray[:=]|cdnjs\.cloudflare\.com|cloudflare-static/gi, severity: "info", category: "technology", description: "Cloudflare detected." },
     { name: "Google Analytics", pattern: /(?:gtag|ga)\s*\(\s*['"](?:send|config|event)['"]|google-analytics\.com\/(?:analytics|ga|gtag)/g, severity: "info", category: "technology", description: "Google Analytics tracking detected." },
     { name: "Google Tag Manager", pattern: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]+/g, severity: "info", category: "technology", description: "Google Tag Manager detected." },
     { name: "Facebook Pixel", pattern: /fbq\s*\(\s*['"]init['"]|connect\.facebook\.net\/.*fbevents/g, severity: "info", category: "technology", description: "Facebook Pixel tracking detected." },
@@ -157,7 +157,32 @@ const SCAN_PATTERNS = {
     { name: "Segment", pattern: /analytics\.(?:identify|track|page)\s*\(|cdn\.segment\.com/g, severity: "info", category: "technology", description: "Segment analytics detected." },
     { name: "Intercom", pattern: /intercomSettings|widget\.intercom\.io|Intercom\s*\(/g, severity: "info", category: "technology", description: "Intercom widget detected." },
     { name: "Sentry Error Tracking", pattern: /sentry\.io|Sentry\.init|dsn:\s*['"]https:\/\/[^'"]*sentry/g, severity: "info", category: "technology", description: "Sentry error tracking detected." },
-    { name: "PostHog Analytics", pattern: /posthog\.init|posthog\.capture|app\.posthog\.com/g, severity: "info", category: "technology", description: "PostHog analytics detected." }
+    { name: "PostHog Analytics", pattern: /posthog\.init|posthog\.capture|app\.posthog\.com/g, severity: "info", category: "technology", description: "PostHog analytics detected." },
+    // Font services
+    { name: "Google Font API", pattern: /fonts\.googleapis\.com|fonts\.gstatic\.com/g, severity: "info", category: "technology", description: "Google Fonts detected." },
+    { name: "Adobe Fonts", pattern: /use\.typekit\.net|p\.typekit\.net/g, severity: "info", category: "technology", description: "Adobe Fonts (Typekit) detected." },
+    // Additional frameworks
+    { name: "Svelte", pattern: /svelte-[a-z0-9]+|__svelte/g, severity: "info", category: "technology", description: "Svelte detected." },
+    { name: "Gatsby", pattern: /gatsby-image|gatsby-link|\/static\/[a-f0-9]+-/g, severity: "info", category: "technology", description: "Gatsby detected." },
+    { name: "Remix", pattern: /__remix|remix-run/g, severity: "info", category: "technology", description: "Remix framework detected." },
+    { name: "Tailwind CSS", pattern: /tailwindcss|tailwind\.min\.css/gi, severity: "info", category: "technology", description: "Tailwind CSS detected." },
+    // CMS & Platforms
+    { name: "Shopify", pattern: /cdn\.shopify\.com|Shopify\.theme/g, severity: "info", category: "technology", description: "Shopify detected." },
+    { name: "Squarespace", pattern: /squarespace\.com\/universal|static\.squarespace\.com/g, severity: "info", category: "technology", description: "Squarespace detected." },
+    { name: "Wix", pattern: /static\.wixstatic\.com|wix-code-sdk/g, severity: "info", category: "technology", description: "Wix detected." },
+    { name: "Webflow", pattern: /assets\.website-files\.com|webflow\.com\/js/g, severity: "info", category: "technology", description: "Webflow detected." },
+    { name: "Ghost", pattern: /ghost-(?:url|version)|content\/themes\/casper/g, severity: "info", category: "technology", description: "Ghost CMS detected." },
+    { name: "Drupal", pattern: /Drupal\.settings|drupal\.js|sites\/(?:all|default)\/(?:files|themes|modules)/g, severity: "info", category: "technology", description: "Drupal detected." },
+    { name: "Joomla", pattern: /\/media\/jui\/|\/components\/com_|Joomla!/g, severity: "info", category: "technology", description: "Joomla detected." },
+    // Analytics & Marketing
+    { name: "Mixpanel", pattern: /mixpanel\.init|cdn\.mxpnl\.com|api\.mixpanel\.com/g, severity: "info", category: "technology", description: "Mixpanel analytics detected." },
+    { name: "Amplitude", pattern: /amplitude\.getInstance|cdn\.amplitude\.com/g, severity: "info", category: "technology", description: "Amplitude analytics detected." },
+    { name: "Heap Analytics", pattern: /heap\.load|cdn\.heapanalytics\.com/g, severity: "info", category: "technology", description: "Heap analytics detected." },
+    // Misc
+    { name: "reCAPTCHA", pattern: /google\.com\/recaptcha|grecaptcha/g, severity: "info", category: "technology", description: "Google reCAPTCHA detected." },
+    { name: "hCaptcha", pattern: /hcaptcha\.com\/1\/api|h-captcha/g, severity: "info", category: "technology", description: "hCaptcha detected." },
+    { name: "Stripe.js", pattern: /js\.stripe\.com|Stripe\s*\(\s*['"]pk_/g, severity: "info", category: "technology", description: "Stripe.js payment integration detected." },
+    { name: "PayPal", pattern: /paypal\.com\/sdk|paypalobjects\.com/g, severity: "info", category: "technology", description: "PayPal integration detected." }
   ],
 
   // ── Mixed Content & Transport ──

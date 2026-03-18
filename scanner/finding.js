@@ -35,8 +35,9 @@ function truncate(str, max) {
 function deduplicateFindings(findings) {
   const seen = new Set();
   return findings.filter(f => {
-    // Dedupe by category + match (ignore location to collapse duplicates across sources)
-    const key = `${f.category}:${f.match}`;
+    // Technology findings: dedupe by title (e.g. "Cloudflare" from headers and DOM are the same)
+    // Other findings: dedupe by category + match
+    const key = f.category === "technology" ? `technology:${f.title}` : `${f.category}:${f.match}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

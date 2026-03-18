@@ -215,10 +215,43 @@
     "Laravel": { icon: "fa-brands fa-laravel", group: "frameworks" },
     "Spring Framework": { icon: "fa-brands fa-java", group: "frameworks" },
     "ASP.NET": { icon: "fa-brands fa-microsoft", group: "frameworks" },
+    "Express": { icon: "fa-brands fa-node-js", group: "frameworks" },
+    "Svelte": { icon: "fa-solid fa-bolt", group: "frameworks" },
+    "Gatsby": { icon: "fa-solid fa-bolt", group: "frameworks" },
+    "Remix": { icon: "fa-solid fa-bolt", group: "frameworks" },
+    "Tailwind CSS": { icon: "fa-brands fa-css3-alt", group: "frameworks" },
+    "PHP": { icon: "fa-brands fa-php", group: "frameworks" },
+    "Stripe.js": { icon: "fa-brands fa-stripe", group: "frameworks" },
     // CMS
     "WordPress": { icon: "fa-brands fa-wordpress", group: "cms" },
-    // Server & CDN
-    "Cloudflare": { icon: "fa-solid fa-cloud-bolt", group: "server" },
+    "Shopify": { icon: "fa-brands fa-shopify", group: "cms" },
+    "Squarespace": { icon: "fa-brands fa-squarespace", group: "cms" },
+    "Wix": { icon: "fa-brands fa-wix", group: "cms" },
+    "Webflow": { icon: "fa-solid fa-paintbrush", group: "cms" },
+    "Ghost": { icon: "fa-solid fa-ghost", group: "cms" },
+    "Drupal": { icon: "fa-brands fa-drupal", group: "cms" },
+    "Joomla": { icon: "fa-brands fa-joomla", group: "cms" },
+    // Server & CDN & Hosting
+    "Cloudflare": { icon: "fa-brands fa-cloudflare", group: "server" },
+    "Fastly": { icon: "fa-solid fa-bolt", group: "server" },
+    "Akamai": { icon: "fa-solid fa-globe", group: "server" },
+    "Amazon CloudFront": { icon: "fa-brands fa-aws", group: "server" },
+    "Nginx": { icon: "fa-solid fa-server", group: "server" },
+    "Apache": { icon: "fa-solid fa-server", group: "server" },
+    "LiteSpeed": { icon: "fa-solid fa-server", group: "server" },
+    "OpenResty": { icon: "fa-solid fa-server", group: "server" },
+    "IIS": { icon: "fa-brands fa-microsoft", group: "server" },
+    "Varnish": { icon: "fa-solid fa-bolt", group: "server" },
+    "GitHub Pages": { icon: "fa-brands fa-github", group: "server" },
+    "Vercel": { icon: "fa-solid fa-triangle-exclamation", group: "server" },
+    "Netlify": { icon: "fa-solid fa-globe", group: "server" },
+    "Azure": { icon: "fa-brands fa-microsoft", group: "server" },
+    "Google Cloud Storage": { icon: "fa-brands fa-google", group: "server" },
+    "Fly.io": { icon: "fa-solid fa-plane", group: "server" },
+    "Render": { icon: "fa-solid fa-server", group: "server" },
+    "Sucuri": { icon: "fa-solid fa-shield-halved", group: "server" },
+    // Security
+    "HSTS": { icon: "fa-solid fa-lock", group: "server" },
     // Analytics
     "Google Analytics": { icon: "fa-brands fa-google", group: "analytics" },
     "Google Tag Manager": { icon: "fa-brands fa-google", group: "analytics" },
@@ -227,7 +260,17 @@
     "Segment": { icon: "fa-solid fa-chart-pie", group: "analytics" },
     "Intercom": { icon: "fa-solid fa-headset", group: "analytics" },
     "Sentry Error Tracking": { icon: "fa-solid fa-bug", group: "analytics" },
-    "PostHog Analytics": { icon: "fa-solid fa-chart-bar", group: "analytics" }
+    "PostHog Analytics": { icon: "fa-solid fa-chart-bar", group: "analytics" },
+    "Mixpanel": { icon: "fa-solid fa-chart-line", group: "analytics" },
+    "Amplitude": { icon: "fa-solid fa-chart-area", group: "analytics" },
+    "Heap Analytics": { icon: "fa-solid fa-chart-bar", group: "analytics" },
+    // Fonts
+    "Google Font API": { icon: "fa-brands fa-google", group: "frameworks" },
+    "Adobe Fonts": { icon: "fa-solid fa-font", group: "frameworks" },
+    // Other
+    "reCAPTCHA": { icon: "fa-brands fa-google", group: "frameworks" },
+    "hCaptcha": { icon: "fa-solid fa-robot", group: "frameworks" },
+    "PayPal": { icon: "fa-brands fa-paypal", group: "frameworks" }
   };
 
   function renderSiteProfile() {
@@ -252,7 +295,8 @@
 
       // Technology findings
       if (f.category === "technology") {
-        const tech = TECH_MAP[f.title];
+        // Try exact match first, then match base name (for versioned titles like "Nginx 1.24")
+        const tech = TECH_MAP[f.title] || TECH_MAP[f.title.split(" ")[0]];
         if (tech) {
           const group = tech.group;
           sections[group].items.push({
@@ -575,7 +619,7 @@
   function getReportData() {
     return {
       tool: "Nexus Scanner",
-      version: "1.0.1",
+      version: "1.0.2",
       url: currentUrl,
       scanDate: new Date().toISOString(),
       summary: {
@@ -591,7 +635,8 @@
   }
 
   function getFilePrefix() {
-    const hostname = currentUrl ? new URL(currentUrl).hostname : "unknown";
+    let hostname = "unknown";
+    try { hostname = currentUrl ? new URL(currentUrl).hostname : "unknown"; } catch (e) { /* invalid URL */ }
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
     return `Nexus-${hostname}-${timestamp}`;
   }
@@ -621,7 +666,8 @@
   }
 
   function generateHtmlReport(report) {
-    const hostname = report.url ? new URL(report.url).hostname : "unknown";
+    let hostname = "unknown";
+    try { hostname = report.url ? new URL(report.url).hostname : "unknown"; } catch (e) { /* invalid URL */ }
     const scanDate = new Date(report.scanDate);
     const dateStr = scanDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
     const timeStr = scanDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -867,18 +913,23 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
     };
 
     const seen = new Set();
-    const analyticsNames = ["Google Analytics", "Google Tag Manager", "Facebook Pixel", "Hotjar", "Segment", "Intercom", "Sentry Error Tracking", "PostHog Analytics"];
-    const cmsNames = ["WordPress"];
+    const analyticsNames = ["Google Analytics", "Google Tag Manager", "Facebook Pixel", "Hotjar", "Segment", "Intercom", "Sentry Error Tracking", "PostHog Analytics", "Mixpanel", "Amplitude", "Heap Analytics"];
+    const cmsNames = ["WordPress", "Shopify", "Squarespace", "Wix", "Webflow", "Ghost", "Drupal", "Joomla"];
+    const serverNames = ["Cloudflare", "Fastly", "Akamai", "Amazon CloudFront", "Nginx", "Apache", "LiteSpeed", "OpenResty", "IIS", "Varnish", "GitHub Pages", "Vercel", "Netlify", "Azure", "Google Cloud Storage", "Fly.io", "Render", "Sucuri", "HSTS"];
 
     for (const f of findings) {
       if (seen.has(f.title)) continue;
       seen.add(f.title);
 
       if (f.category === "technology") {
-        if (analyticsNames.includes(f.title)) {
+        // Match base name for versioned titles like "Nginx 1.24"
+        const baseName = f.title.split(" ")[0];
+        if (analyticsNames.includes(f.title) || analyticsNames.includes(baseName)) {
           groups["Analytics & Tracking"].items.push({ label: f.title, color: "t-yellow" });
-        } else if (cmsNames.includes(f.title)) {
+        } else if (cmsNames.includes(f.title) || cmsNames.includes(baseName)) {
           groups["CMS & Platform"].items.push({ label: f.title, color: "t-green" });
+        } else if (serverNames.includes(f.title) || serverNames.includes(baseName)) {
+          groups["Server & Infrastructure"].items.push({ label: f.title, color: "t-gray" });
         } else if (f.title.startsWith("CMS/Framework:")) {
           groups["CMS & Platform"].items.push({ label: f.title.replace("CMS/Framework: ", ""), color: "t-green" });
         } else {
@@ -957,7 +1008,11 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
       toast.className = "toast";
       document.body.appendChild(toast);
     }
-    toast.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${message}`;
+    toast.textContent = "";
+    const icon = document.createElement("i");
+    icon.className = "fa-solid fa-check-circle";
+    toast.appendChild(icon);
+    toast.appendChild(document.createTextNode(" " + message));
     toast.classList.add("show");
     setTimeout(() => toast.classList.remove("show"), 2000);
   }
@@ -970,7 +1025,7 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
   }
 
   function escapeAttr(str) {
-    return str.replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   // ── Start ──
