@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexus Scanner</title>
+  <title>Nexus</title>
   <link rel="stylesheet" href="../lib/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="popup.css">
 </head>
@@ -11,29 +11,33 @@
   <div class="container">
     <!-- Header -->
     <header class="header">
-      <div class="header-title">
-        <img src="../icons/icon48.png" alt="Nexus Logo" class="logo" style="width: 24px; height: 24px;">
-        <h1>Nexus Scanner</h1>
+      <div class="header-left">
+        <div class="header-brand">
+          <img src="../icons/icon48.png" alt="" class="header-logo">
+          <span class="header-name">NEXUS</span>
+          <span class="header-version" id="version-label"></span>
+        </div>
       </div>
       <div class="header-actions">
-        <button id="btn-rescan" class="btn btn-sm" title="Re-scan current page">
-          <i class="fa-solid fa-rotate"></i>
-          Rescan
+        <button id="btn-rescan" class="btn btn-ghost" title="Scan current page">
+          <i class="fa-solid fa-bolt"></i>
+          <span>Scan</span>
         </button>
         <div class="export-dropdown">
-          <button id="btn-export-toggle" class="btn btn-sm btn-primary" title="Export report">
-            <i class="fa-solid fa-file-export"></i>
-            Export <i class="fa-solid fa-caret-down"></i>
+          <button id="btn-export-toggle" class="btn btn-accent" title="Export report">
+            <i class="fa-solid fa-arrow-up-from-bracket"></i>
+            <span>Export</span>
+            <i class="fa-solid fa-chevron-down btn-chevron"></i>
           </button>
           <div class="export-menu" id="export-menu">
             <button id="btn-export-json" class="export-option">
-              <i class="fa-solid fa-file-code"></i> Export JSON
+              <i class="fa-solid fa-braces"></i> JSON
             </button>
             <button id="btn-export-html" class="export-option">
-              <i class="fa-solid fa-file-lines"></i> Export HTML
+              <i class="fa-solid fa-file-code"></i> HTML Report
             </button>
             <button id="btn-export-csv" class="export-option">
-              <i class="fa-solid fa-file-csv"></i> Export CSV
+              <i class="fa-solid fa-table-cells"></i> CSV
             </button>
           </div>
         </div>
@@ -41,37 +45,37 @@
     </header>
 
     <!-- Target URL -->
-    <div class="target-url" id="target-url">
-      <i class="fa-solid fa-globe"></i>
-      <span id="target-url-text"></span>
+    <div class="target-bar" id="target-url">
+      <div class="target-label">TARGET</div>
+      <div class="target-value" id="target-url-text"></div>
     </div>
 
-    <!-- Summary Bar -->
-    <div class="summary-bar" id="summary-bar">
-      <div class="summary-pill critical" data-severity="critical">
-        <i class="fa-solid fa-skull-crossbones"></i>
-        <span class="pill-count" id="count-critical">0</span>
-        <span class="pill-label">Critical</span>
+    <!-- Severity Grid -->
+    <div class="severity-grid" id="summary-bar">
+      <div class="sev-cell sev-critical" data-severity="critical">
+        <div class="sev-count" id="count-critical">0</div>
+        <div class="sev-name">CRIT</div>
+        <div class="sev-indicator"></div>
       </div>
-      <div class="summary-pill high" data-severity="high">
-        <i class="fa-solid fa-triangle-exclamation"></i>
-        <span class="pill-count" id="count-high">0</span>
-        <span class="pill-label">High</span>
+      <div class="sev-cell sev-high" data-severity="high">
+        <div class="sev-count" id="count-high">0</div>
+        <div class="sev-name">HIGH</div>
+        <div class="sev-indicator"></div>
       </div>
-      <div class="summary-pill medium" data-severity="medium">
-        <i class="fa-solid fa-exclamation"></i>
-        <span class="pill-count" id="count-medium">0</span>
-        <span class="pill-label">Medium</span>
+      <div class="sev-cell sev-medium" data-severity="medium">
+        <div class="sev-count" id="count-medium">0</div>
+        <div class="sev-name">MED</div>
+        <div class="sev-indicator"></div>
       </div>
-      <div class="summary-pill low" data-severity="low">
-        <i class="fa-solid fa-info"></i>
-        <span class="pill-count" id="count-low">0</span>
-        <span class="pill-label">Low</span>
+      <div class="sev-cell sev-low" data-severity="low">
+        <div class="sev-count" id="count-low">0</div>
+        <div class="sev-name">LOW</div>
+        <div class="sev-indicator"></div>
       </div>
-      <div class="summary-pill info" data-severity="info">
-        <i class="fa-solid fa-circle-info"></i>
-        <span class="pill-count" id="count-info">0</span>
-        <span class="pill-label">Info</span>
+      <div class="sev-cell sev-info" data-severity="info">
+        <div class="sev-count" id="count-info">0</div>
+        <div class="sev-name">INFO</div>
+        <div class="sev-indicator"></div>
       </div>
     </div>
 
@@ -79,7 +83,7 @@
     <div class="filter-bar">
       <div class="search-wrapper">
         <i class="fa-solid fa-magnifying-glass search-icon"></i>
-        <input type="text" id="search-input" class="search-input" placeholder="Search findings...">
+        <input type="text" id="search-input" class="search-input" placeholder="Filter findings...">
       </div>
       <select id="category-filter" class="category-filter">
         <option value="all">All Categories</option>
@@ -88,13 +92,13 @@
 
     <!-- Scan Status -->
     <div class="scan-status" id="scan-status">
-      <i class="fa-solid fa-spinner fa-spin"></i>
-      <span>Scanning page...</span>
+      <div class="scan-pulse"></div>
+      <span>Scanning target...</span>
     </div>
 
     <!-- Scan Summary -->
     <div class="scan-summary" id="scan-summary" style="display:none;">
-      <i class="fa-solid fa-chart-bar"></i>
+      <i class="fa-solid fa-signal"></i>
       <span id="scan-summary-text"></span>
     </div>
 
@@ -105,46 +109,38 @@
       <div class="site-profile" id="site-profile" style="display:none;">
         <div class="profile-header" id="profile-toggle">
           <i class="fa-solid fa-fingerprint"></i>
-          <span>Site Profile</span>
+          <span>Reconnaissance Profile</span>
           <i class="fa-solid fa-chevron-down profile-chevron"></i>
         </div>
         <div class="profile-body" id="profile-body">
-          <!-- Server & Infra -->
           <div class="profile-section" id="prof-server" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-server"></i> Server & Infrastructure</div>
             <div class="profile-tags" id="prof-server-tags"></div>
           </div>
-          <!-- Frameworks -->
           <div class="profile-section" id="prof-frameworks" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-layer-group"></i> Frameworks & Libraries</div>
             <div class="profile-tags" id="prof-frameworks-tags"></div>
           </div>
-          <!-- CMS -->
           <div class="profile-section" id="prof-cms" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-pencil"></i> CMS & Platform</div>
             <div class="profile-tags" id="prof-cms-tags"></div>
           </div>
-          <!-- Analytics & Tracking -->
           <div class="profile-section" id="prof-analytics" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-chart-line"></i> Analytics & Tracking</div>
             <div class="profile-tags" id="prof-analytics-tags"></div>
           </div>
-          <!-- Security -->
           <div class="profile-section" id="prof-security" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-shield-halved"></i> Security Posture</div>
             <div class="profile-tags" id="prof-security-tags"></div>
           </div>
-          <!-- Cookies -->
           <div class="profile-section" id="prof-cookies" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-cookie-bite"></i> Cookies</div>
             <div class="profile-tags" id="prof-cookies-tags"></div>
           </div>
-          <!-- Endpoints -->
           <div class="profile-section" id="prof-endpoints" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-route"></i> API Endpoints <span class="endpoint-count" id="prof-endpoints-count"></span></div>
             <div class="profile-endpoints-list" id="prof-endpoints-tags"></div>
           </div>
-          <!-- Env Vars -->
           <div class="profile-section" id="prof-env" style="display:none;">
             <div class="profile-section-title"><i class="fa-solid fa-terminal"></i> Environment Variables</div>
             <div class="profile-tags" id="prof-env-tags"></div>
@@ -153,24 +149,22 @@
       </div>
 
       <!-- Findings List -->
-      <div class="findings-list" id="findings-list">
-        <!-- Findings will be rendered here -->
-      </div>
+      <div class="findings-list" id="findings-list"></div>
 
-      <!-- Empty State (No Findings) -->
+      <!-- Empty State -->
       <div class="empty-state" id="empty-state" style="display:none;">
-        <i class="fa-solid fa-circle-check"></i>
+        <div class="empty-icon"><i class="fa-solid fa-shield-check"></i></div>
         <p>No findings detected</p>
-        <span>This page appears clean</span>
+        <span>Target surface appears clean</span>
       </div>
 
       <!-- Start Scan State -->
-      <div class="empty-state" id="start-scan-state" style="display:none;">
-        <i class="fa-solid fa-radar"></i>
-        <p>Passive Scan Ready</p>
-        <span>Click to scan this page</span>
-        <button id="btn-start-scan" class="btn btn-primary" style="margin-top: 15px;">
-          <i class="fa-solid fa-play"></i> Start Scan
+      <div class="empty-state start-state" id="start-scan-state" style="display:none;">
+        <div class="empty-icon scan-ready"><i class="fa-solid fa-crosshairs"></i></div>
+        <p>Ready to Scan</p>
+        <span>Analyze target for exposed secrets, misconfigurations, and attack surface</span>
+        <button id="btn-start-scan" class="btn btn-scan">
+          <i class="fa-solid fa-bolt"></i> Start Reconnaissance
         </button>
       </div>
 
@@ -178,11 +172,13 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <span><i class="fa-solid fa-eye"></i> Nexus Scanner <span id="version-label"></span></span>
-      <a href="https://github.com/intelseclab/nexus" target="_blank" class="footer-github" title="Star us on GitHub">
-        <i class="fa-brands fa-github"></i> <i class="fa-solid fa-star"></i>
+      <span class="footer-brand"><i class="fa-solid fa-eye"></i> Nexus <span id="footer-version"></span></span>
+      <a href="https://github.com/intelseclab/nexus" target="_blank" class="footer-github" title="Star on GitHub">
+        <i class="fa-brands fa-github"></i>
+        <span>Star</span>
+        <i class="fa-solid fa-star"></i>
       </a>
-      <span id="finding-total">0 findings</span>
+      <span class="footer-count" id="finding-total">0 findings</span>
     </footer>
   </div>
 

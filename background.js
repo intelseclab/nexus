@@ -184,6 +184,53 @@ function scanHeaders(tabId, headers, url) {
         match: "default-src contains *", location: url
       }));
     }
+    if (!csp.includes("script-src") && !csp.includes("default-src")) {
+      findings.push(createFinding({
+        severity: "high", category: "security-header",
+        title: "CSP Missing script-src",
+        description: "CSP has no script-src or default-src directive. All scripts are allowed.",
+        match: "No script-src in CSP", location: url
+      }));
+    }
+    if (/script-src[^;]*data:/i.test(csp)) {
+      findings.push(createFinding({
+        severity: "high", category: "security-header",
+        title: "CSP script-src Allows data: URI",
+        description: "CSP script-src permits data: URIs which can be used for XSS.",
+        match: "data: in script-src", location: url
+      }));
+    }
+    if (/script-src[^;]*\bhttp:/i.test(csp)) {
+      findings.push(createFinding({
+        severity: "medium", category: "security-header",
+        title: "CSP script-src Allows HTTP",
+        description: "CSP script-src permits loading scripts over HTTP (MitM risk).",
+        match: "http: in script-src", location: url
+      }));
+    }
+  }
+
+  // HSTS deep analysis
+  if (headerMap["strict-transport-security"]) {
+    const hsts = headerMap["strict-transport-security"];
+    const maxAgeMatch = hsts.match(/max-age=(\d+)/i);
+    const maxAge = maxAgeMatch ? parseInt(maxAgeMatch[1]) : 0;
+    if (maxAge < 31536000) {
+      findings.push(createFinding({
+        severity: "medium", category: "security-header",
+        title: "HSTS max-age Below 1 Year",
+        description: `HSTS max-age is ${maxAge}s (${Math.round(maxAge/86400)} days). Should be at least 31536000 (1 year).`,
+        match: `max-age=${maxAge}`, location: url
+      }));
+    }
+    if (!/includeSubDomains/i.test(hsts)) {
+      findings.push(createFinding({
+        severity: "low", category: "security-header",
+        title: "HSTS Missing includeSubDomains",
+        description: "HSTS does not include subdomains. Subdomains can be accessed over HTTP.",
+        match: hsts.substring(0, 200), location: url
+      }));
+    }
   }
 
   // Server version disclosure
@@ -347,7 +394,7 @@ function scanHeaders(tabId, headers, url) {
 
 async function scanJsFiles(tabId, urls, signal) {
   const findings = [];
-  const maxFiles = 30;
+  const maxFiles = 60;
   const maxSize = 2 * 1024 * 1024;
   const filesToScan = urls.slice(0, maxFiles);
 
@@ -357,23 +404,24 @@ async function scanJsFiles(tabId, urls, signal) {
     SCAN_PATTERNS.endpoints,
     SCAN_PATTERNS.envVars,
     SCAN_PATTERNS.sourceMaps,
-    SCAN_PATTERNS.domSecurity
+    SCAN_PATTERNS.domSecurity,
+    SCAN_PATTERNS.media
   ];
 
   let scannedCount = 0;
   for (const url of filesToScan) {
     if (signal.aborted) break;
+    let onAbort = null;
+    let timeoutId = null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      timeoutId = setTimeout(() => controller.abort(), 8000);
 
       // Chain with parent signal so navigation cancels in-flight fetches
-      const onAbort = () => controller.abort();
+      onAbort = () => controller.abort();
       signal.addEventListener("abort", onAbort, { once: true });
 
       const response = await fetch(url, { credentials: "omit", signal: controller.signal });
-      clearTimeout(timeoutId);
-      signal.removeEventListener("abort", onAbort);
 
       if (!response.ok) continue;
 
@@ -407,6 +455,9 @@ async function scanJsFiles(tabId, urls, signal) {
       }
     } catch (err) {
       if (signal.aborted) break;
+    } finally {
+      clearTimeout(timeoutId);
+      if (onAbort) signal.removeEventListener("abort", onAbort);
     }
   }
 
@@ -449,7 +500,8 @@ async function probePaths(tabId, origin, signal) {
   }
 
   let nextIdx = 0;
-  let probedCount = 0;
+  // Shared counter object — increment is always synchronous before the next await
+  const stats = { probed: 0 };
 
   async function worker() {
     while (!signal.aborted) {
@@ -461,20 +513,20 @@ async function probePaths(tabId, origin, signal) {
       const MAX_RETRIES = 3;
 
       while (retries <= MAX_RETRIES && !signal.aborted) {
+        let onAbort = null;
+        let timeoutId = null;
         try {
           const url = origin + entry.path;
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          const onAbort = () => controller.abort();
+          timeoutId = setTimeout(() => controller.abort(), 5000);
+          onAbort = () => controller.abort();
           signal.addEventListener("abort", onAbort, { once: true });
 
           const response = await fetch(url, {
             method: "GET", credentials: "omit", redirect: "manual",
             signal: controller.signal
           });
-          clearTimeout(timeoutId);
-          signal.removeEventListener("abort", onAbort);
-          probedCount++;
+          stats.probed++;
 
           if (response.status === 429 && retries < MAX_RETRIES) {
             retries++;
@@ -514,6 +566,9 @@ async function probePaths(tabId, origin, signal) {
         } catch (err) {
           if (signal.aborted) return;
           break;
+        } finally {
+          clearTimeout(timeoutId);
+          if (onAbort) signal.removeEventListener("abort", onAbort);
         }
       }
 
@@ -524,7 +579,7 @@ async function probePaths(tabId, origin, signal) {
 
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-  updateScanSummary(tabId, { pathsProbed: probedCount });
+  updateScanSummary(tabId, { pathsProbed: stats.probed });
   mergeFindings(tabId, "paths", deduplicateFindings(findings));
 }
 
@@ -536,6 +591,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CONTENT_FINDINGS") {
     if (tabId) {
       const hasJsFiles = message.jsFileUrls && message.jsFileUrls.length > 0;
+      // +1 for paths (always probed), +1 for jsFiles if present
+      // Note: content's decrement is already allocated in REQUEST_SCAN's pendingScans=2
       const extraPending = 1 + (hasJsFiles ? 1 : 0);
 
       // Retrieve or create the scan signal for this tab
@@ -544,14 +601,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         signal = createScanAbort(tabId);
       }
 
+      // Validate jsFileUrls: only allow http(s) URLs matching the tab's origin
+      // to prevent a malicious page from injecting arbitrary fetch targets
+      let safeJsUrls = null;
+      if (hasJsFiles && sender.tab?.url) {
+        try {
+          const tabOrigin = new URL(sender.tab.url).origin;
+          safeJsUrls = message.jsFileUrls.filter(u => {
+            try { return u.startsWith("https://") || u.startsWith("http://"); }
+            catch (e) { return false; }
+          });
+        } catch (e) { safeJsUrls = null; }
+      }
+      const hasValidJsFiles = safeJsUrls && safeJsUrls.length > 0;
+
       withTabLock(tabId, async () => {
         const existing = await getTabFindings(tabId);
         existing.pendingScans = (existing.pendingScans || 0) + extraPending;
         await saveTabFindings(tabId, existing);
       }).then(() => {
         mergeFindings(tabId, "content", message.findings, message.url).then(() => {
-          if (hasJsFiles) {
-            scanJsFiles(tabId, message.jsFileUrls, signal);
+          if (hasValidJsFiles) {
+            scanJsFiles(tabId, safeJsUrls, signal);
+          } else if (hasJsFiles) {
+            // jsFileUrls provided but none valid — still decrement pending
+            mergeFindings(tabId, "jsFiles", []);
           }
           if (sender.tab?.url) {
             try {
@@ -581,6 +655,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           status: tabData.status || "idle",
           scanSummary: tabData.scanSummary || {}
         });
+      }).catch(() => {
+        sendResponse({ findings: [], summary: {}, url: "", status: "idle", scanSummary: {} });
       });
       return true;
     }

@@ -37,7 +37,13 @@
     "standard": "fa-solid fa-file-lines",
     "dom-security": "fa-solid fa-code",
     "technology": "fa-solid fa-microchip",
-    "transport": "fa-solid fa-lock-open"
+    "transport": "fa-solid fa-lock-open",
+    "web-storage": "fa-solid fa-hard-drive",
+    "sri": "fa-solid fa-link-slash",
+    "subdomain": "fa-solid fa-sitemap",
+    "infrastructure": "fa-solid fa-diagram-project",
+    "sensitive-link": "fa-solid fa-file-zipper",
+    "media": "fa-solid fa-film"
   };
 
   const SEVERITY_ICONS = {
@@ -101,7 +107,13 @@
     "cloud": "Remove cloud credential files from the web root immediately. Rotate affected credentials.",
     "dom-security": "Sanitize user-controlled input before using it in DOM manipulation. Use textContent instead of innerHTML.",
     "transport": "Migrate all resources and form actions to HTTPS. Enable HSTS to enforce secure connections.",
-    "standard": "Review robots.txt and sitemap for unintended path disclosure."
+    "standard": "Review robots.txt and sitemap for unintended path disclosure.",
+    "web-storage": "Avoid storing tokens or secrets in localStorage/sessionStorage. Use HttpOnly cookies for session management.",
+    "sri": "Add integrity= attributes to all cross-origin script and stylesheet tags to prevent supply-chain attacks.",
+    "subdomain": "Enumerate discovered subdomains for additional attack surface. Check for subdomain takeover.",
+    "infrastructure": "Map discovered infrastructure hosts. Check for exposed services and access controls.",
+    "sensitive-link": "Remove links to sensitive files or restrict access via server configuration.",
+    "media": "Check if media URLs contain replayable tokens. Signed URLs may allow unauthorized access to premium content."
   };
 
   // ── Init ──
@@ -112,6 +124,8 @@
     // Set version from manifest (single source of truth)
     const manifest = chrome.runtime.getManifest();
     if (versionLabel) versionLabel.textContent = `v${manifest.version}`;
+    const footerVersion = document.getElementById("footer-version");
+    if (footerVersion) footerVersion.textContent = `v${manifest.version}`;
 
     targetUrlText.textContent = tab.url || "Unknown";
 
@@ -121,11 +135,13 @@
     // Load existing findings immediately
     loadFindings(tab.id);
 
-    // Event-driven updates via storage changes (replaces polling)
+    // Event-driven updates via storage changes (replaces polling), debounced
     const storageKey = `tab_${tab.id}`;
+    let loadDebounce = null;
     chrome.storage.session.onChanged.addListener((changes) => {
       if (changes[storageKey]) {
-        loadFindings(tab.id);
+        clearTimeout(loadDebounce);
+        loadDebounce = setTimeout(() => loadFindings(tab.id), 150);
       }
     });
 
@@ -144,14 +160,14 @@
     categoryFilter.addEventListener("change", applyFilters);
 
     // Severity pill click filters
-    document.querySelectorAll(".summary-pill").forEach(pill => {
+    document.querySelectorAll(".sev-cell").forEach(pill => {
       pill.addEventListener("click", () => {
         const severity = pill.dataset.severity;
         if (activeSeverityFilter === severity) {
           activeSeverityFilter = null;
           pill.classList.remove("active");
         } else {
-          document.querySelectorAll(".summary-pill").forEach(p => p.classList.remove("active"));
+          document.querySelectorAll(".sev-cell").forEach(p => p.classList.remove("active"));
           activeSeverityFilter = severity;
           pill.classList.add("active");
         }
@@ -539,11 +555,11 @@
     const query = searchInput.value.toLowerCase().trim();
     if (query) {
       filtered = filtered.filter(f =>
-        f.title.toLowerCase().includes(query) ||
-        f.match.toLowerCase().includes(query) ||
-        f.description.toLowerCase().includes(query) ||
-        f.location.toLowerCase().includes(query) ||
-        f.category.toLowerCase().includes(query)
+        (f.title || "").toLowerCase().includes(query) ||
+        (f.match || "").toLowerCase().includes(query) ||
+        (f.description || "").toLowerCase().includes(query) ||
+        (f.location || "").toLowerCase().includes(query) ||
+        (f.category || "").toLowerCase().includes(query)
       );
     }
 
@@ -572,7 +588,7 @@
     sortedCategories.forEach(category => {
       const header = document.createElement("div");
       header.className = "category-header";
-      header.innerHTML = `<i class="${getCategoryIcon(category)}"></i> ${formatCategory(category)} (${grouped[category].length})`;
+      header.innerHTML = `<i class="${escapeAttr(getCategoryIcon(category))}"></i> ${escapeHtml(formatCategory(category))} (${grouped[category].length})`;
       findingsList.appendChild(header);
 
       grouped[category].forEach(finding => {
@@ -740,8 +756,10 @@
     const headers = ["Severity", "Category", "Title", "Description", "Match", "Location", "Context"];
     const csvEscape = (str) => {
       if (!str) return "";
-      const s = String(str).replace(/"/g, '""');
-      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+      let s = String(str).replace(/"/g, '""');
+      // Prevent CSV formula injection: prefix cells starting with =, +, -, @ with a tab
+      if (/^[=+\-@]/.test(s)) s = "\t" + s;
+      return s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\t") ? `"${s}"` : s;
     };
     const rows = [headers.join(",")];
     for (const f of report.findings) {
@@ -829,36 +847,36 @@
 :root {
   --bg-0: #0a0a0f; --bg-1: #101018; --bg-2: #16161f; --bg-3: #1e1e2a;
   --border: #252535; --border-l: #2f2f42;
-  --text: #b8bcc8; --text-dim: #6b7084; --text-bright: #e2e4ea;
+  --text: #c8ccda; --text-dim: #8890a6; --text-bright: #eef0f5;
   --accent: #7c6aef; --accent-dim: rgba(124,106,239,0.1);
   --red: #e63946; --orange: #e67e22; --yellow: #c8a92e; --blue: #5b7fa5; --green: #38a169; --gray: #4a5568;
   --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-size:13px; line-height:1.6; }
+body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.65; }
 
 /* ── Top Bar ── */
 .topbar { background:var(--bg-1); border-bottom:1px solid var(--border); padding:12px 0; }
 .topbar-inner { max-width:1100px; margin:0 auto; padding:0 32px; display:flex; align-items:center; justify-content:space-between; }
 .topbar-brand { display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:13px; font-weight:700; color:var(--accent); letter-spacing:1px; }
 .topbar-brand i { font-size:15px; }
-.topbar-label { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:2px; font-weight:600; }
+.topbar-label { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:2px; font-weight:600; }
 
 /* ── Hero ── */
 .hero { background:var(--bg-1); border-bottom:1px solid var(--border); padding:40px 0 36px; }
 .hero-inner { max-width:1100px; margin:0 auto; padding:0 32px; display:flex; align-items:flex-start; justify-content:space-between; gap:40px; }
 .hero-left { flex:1; }
-.hero-label { font-size:10px; color:var(--accent); text-transform:uppercase; letter-spacing:3px; font-weight:700; font-family:var(--mono); margin-bottom:8px; }
+.hero-label { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:2px; font-weight:700; font-family:var(--sans); margin-bottom:8px; }
 .hero-target { font-size:22px; font-weight:700; color:var(--text-bright); font-family:var(--mono); word-break:break-all; margin-bottom:16px; }
 .hero-meta { display:flex; gap:24px; flex-wrap:wrap; }
-.hero-meta-item { font-size:11px; color:var(--text-dim); display:flex; align-items:center; gap:5px; }
+.hero-meta-item { font-size:13px; color:var(--text-dim); display:flex; align-items:center; gap:6px; }
 .hero-meta-item span { color:var(--text); }
 .hero-right { text-align:center; min-width:140px; }
 .risk-ring { width:100px; height:100px; border-radius:50%; border:4px solid ${riskColor}; display:flex; flex-direction:column; align-items:center; justify-content:center; margin:0 auto 8px; background:rgba(0,0,0,0.3); }
 .risk-score { font-size:24px; font-weight:700; color:${riskColor}; font-family:var(--mono); }
-.risk-label-sm { font-size:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1.5px; }
-.risk-label { font-size:11px; font-weight:700; color:${riskColor}; font-family:var(--mono); letter-spacing:2px; }
+.risk-label-sm { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+.risk-label { font-size:13px; font-weight:700; color:${riskColor}; font-family:var(--mono); letter-spacing:2px; }
 
 /* ── Stats Row ── */
 .stats { background:var(--bg-2); border-bottom:1px solid var(--border); padding:16px 0; }
@@ -867,7 +885,7 @@ body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-
 .stat-box:first-child { border-radius:6px 0 0 6px; }
 .stat-box:last-child { border-radius:0 6px 6px 0; }
 .stat-num { font-size:22px; font-weight:700; font-family:var(--mono); }
-.stat-label { font-size:9px; text-transform:uppercase; letter-spacing:1.5px; font-weight:600; margin-top:2px; }
+.stat-label { font-size:11px; text-transform:uppercase; letter-spacing:1px; font-weight:600; margin-top:2px; }
 .stat-crit .stat-num { color:var(--red); } .stat-crit .stat-label { color:var(--red); }
 .stat-high .stat-num { color:var(--orange); } .stat-high .stat-label { color:var(--orange); }
 .stat-med .stat-num { color:var(--yellow); } .stat-med .stat-label { color:var(--yellow); }
@@ -878,11 +896,11 @@ body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-
 /* ── Profile ── */
 .profile { background:var(--bg-1); border-bottom:1px solid var(--border); }
 .profile-inner { max-width:1100px; margin:0 auto; padding:20px 32px; }
-.profile-title { font-size:10px; color:var(--accent); text-transform:uppercase; letter-spacing:3px; font-weight:700; font-family:var(--mono); margin-bottom:14px; display:flex; align-items:center; gap:6px; }
+.profile-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:2px; font-weight:700; font-family:var(--sans); margin-bottom:14px; display:flex; align-items:center; gap:6px; }
 .profile-row { margin-bottom:10px; }
-.profile-row-title { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; font-weight:600; margin-bottom:5px; }
+.profile-row-title { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; font-weight:600; margin-bottom:6px; }
 .profile-row-tags { display:flex; flex-wrap:wrap; gap:5px; }
-.ptag { padding:3px 9px; border-radius:3px; font-size:10px; font-family:var(--mono); font-weight:500; border:1px solid; }
+.ptag { padding:4px 10px; border-radius:4px; font-size:12px; font-family:var(--sans); font-weight:500; border:1px solid; }
 .ptag.t-blue { background:rgba(91,127,165,0.08); color:#8badc4; border-color:rgba(91,127,165,0.2); }
 .ptag.t-green { background:rgba(56,161,105,0.08); color:#68d391; border-color:rgba(56,161,105,0.2); }
 .ptag.t-gray { background:rgba(74,85,104,0.08); color:#8896a7; border-color:rgba(74,85,104,0.2); }
@@ -893,39 +911,39 @@ body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-
 
 /* ── Findings Table ── */
 .findings { max-width:1100px; margin:0 auto; padding:24px 32px; }
-.findings-label { font-size:10px; color:var(--accent); text-transform:uppercase; letter-spacing:3px; font-weight:700; font-family:var(--mono); margin-bottom:14px; display:flex; align-items:center; gap:6px; }
-table { width:100%; border-collapse:collapse; font-size:12px; }
-th { text-align:left; padding:8px 10px; font-size:9px; text-transform:uppercase; letter-spacing:1.5px; color:var(--text-dim); font-weight:600; border-bottom:2px solid var(--border); background:var(--bg-2); }
-.cat-row td { padding:10px 10px 6px; font-size:11px; font-weight:700; color:var(--accent); font-family:var(--mono); letter-spacing:0.5px; border-bottom:1px solid var(--border); background:var(--bg-2); }
-.finding-row td { padding:8px 10px; border-bottom:none; vertical-align:top; background:var(--bg-1); }
+.findings-label { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:2px; font-weight:700; font-family:var(--sans); margin-bottom:14px; display:flex; align-items:center; gap:6px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:10px 12px; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-dim); font-weight:600; border-bottom:2px solid var(--border); background:var(--bg-2); }
+.cat-row td { padding:12px 12px 8px; font-size:13px; font-weight:700; color:var(--accent); font-family:var(--sans); letter-spacing:0.3px; border-bottom:1px solid var(--border); background:var(--bg-2); }
+.finding-row td { padding:10px 12px; border-bottom:none; vertical-align:top; background:var(--bg-1); }
 .finding-row:hover td { background:var(--bg-2); }
-.cell-num { width:32px; color:var(--text-dim); font-family:var(--mono); font-size:10px; }
-.sev-pill { display:inline-block; padding:1px 7px; border-radius:2px; font-size:9px; font-weight:700; font-family:var(--mono); letter-spacing:0.8px; white-space:nowrap; }
-.cell-title { font-weight:500; color:var(--text-bright); max-width:280px; }
-.cell-match { font-family:var(--mono); font-size:11px; color:var(--red); max-width:260px; word-break:break-all; }
+.cell-num { width:32px; color:var(--text-dim); font-family:var(--mono); font-size:12px; }
+.sev-pill { display:inline-block; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; font-family:var(--sans); letter-spacing:0.5px; white-space:nowrap; }
+.cell-title { font-weight:600; color:var(--text-bright); max-width:280px; font-size:13px; }
+.cell-match { font-family:var(--mono); font-size:12px; color:var(--red); max-width:260px; word-break:break-all; }
 .cell-match code { background:rgba(230,57,70,0.06); padding:1px 5px; border-radius:2px; }
-.cell-loc { font-size:10px; color:var(--text-dim); max-width:200px; word-break:break-all; }
-.detail-row td { padding:0 10px 10px; border-bottom:1px solid var(--border); background:var(--bg-1); }
+.cell-loc { font-size:12px; color:var(--text-dim); max-width:200px; word-break:break-all; }
+.detail-row td { padding:0 12px 12px; border-bottom:1px solid var(--border); background:var(--bg-1); }
 .finding-detail { padding:6px 0 2px; }
-.fd-desc { font-size:11px; color:var(--text-dim); margin-bottom:4px; }
-.fd-ctx { font-size:10px; font-family:var(--mono); color:var(--text-dim); background:var(--bg-0); border:1px solid var(--border); padding:6px 10px; border-radius:3px; overflow-x:auto; white-space:pre-wrap; max-height:80px; overflow-y:auto; }
+.fd-desc { font-size:13px; color:var(--text); margin-bottom:6px; line-height:1.5; }
+.fd-ctx { font-size:12px; font-family:var(--mono); color:var(--text-dim); background:var(--bg-0); border:1px solid var(--border); padding:8px 12px; border-radius:4px; overflow-x:auto; white-space:pre-wrap; max-height:100px; overflow-y:auto; line-height:1.5; }
 
 /* ── Footer ── */
 .rpt-footer { max-width:1100px; margin:0 auto; padding:20px 32px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-.rpt-footer-left { font-size:10px; color:var(--text-dim); font-family:var(--mono); }
-.rpt-footer-center { font-size:10px; }
+.rpt-footer-left { font-size:12px; color:var(--text-dim); font-family:var(--sans); }
+.rpt-footer-center { font-size:12px; }
 .rpt-footer-center a:hover { text-decoration:underline !important; }
-.rpt-footer-right { font-size:10px; color:var(--text-dim); }
+.rpt-footer-right { font-size:12px; color:var(--text-dim); }
 
 /* ── Print ── */
 @media print {
-  body { background:#fff; color:#1a1a1a; font-size:11px; }
+  body { background:#fff; color:#1a1a1a; font-size:12px; }
   .topbar, .hero, .stats, .profile, .findings, .rpt-footer { background:#fff; }
   .topbar { display:none; }
   .hero-target { color:#000; }
   .risk-ring { border-color:#333; }
   .stat-box { border-color:#ddd; }
-  table { font-size:10px; }
+  table { font-size:11px; }
   th { background:#f5f5f5; border-color:#ddd; }
   .cat-row td { background:#f5f5f5; border-color:#ddd; color:#333; }
   .finding-row td, .detail-row td { background:#fff; border-color:#eee; }
@@ -991,7 +1009,7 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
 
 <div class="rpt-footer">
   <div class="rpt-footer-left">Nexus // ${escapeHtml(hostname)} // ${dateStr}</div>
-  <div class="rpt-footer-center"><a href="https://github.com/intelseclab/nexus" style="color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:10px;">\u2605 Star on GitHub</a> &middot; <a href="https://github.com/intelseclab" style="color:var(--text-dim);text-decoration:none;font-size:10px;">Follow @intelseclab</a></div>
+  <div class="rpt-footer-center"><a href="https://github.com/intelseclab/nexus" style="color:var(--accent);text-decoration:none;font-size:12px;">\u2605 Star on GitHub</a> &middot; <a href="https://github.com/intelseclab" style="color:var(--text-dim);text-decoration:none;font-size:12px;">Follow @intelseclab</a></div>
   <div class="rpt-footer-right">Reconnaissance scan &mdash; no active exploitation performed</div>
 </div>
 
@@ -1118,8 +1136,9 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
 
   // ── Utilities ──
   function escapeHtml(str) {
+    if (str == null) return "";
     const div = document.createElement("div");
-    div.textContent = str;
+    div.textContent = String(str);
     return div.innerHTML;
   }
 

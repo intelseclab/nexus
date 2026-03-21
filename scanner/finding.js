@@ -28,7 +28,8 @@ function hashStr(str) {
     h2 = Math.imul(h2 ^ (c + i), 0x0100019d) >>> 0;
   }
   // Combine both halves into a larger key space to reduce collisions
-  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+  // Zero-pad both halves to prevent false collisions (e.g. "a"+"bc" vs "ab"+"c")
+  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
 }
 
 function truncate(str, max) {

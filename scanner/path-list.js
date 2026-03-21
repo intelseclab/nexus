@@ -116,7 +116,37 @@ const SENSITIVE_PATHS = [
   { path: "/.aws/credentials", severity: "critical", category: "cloud", title: "AWS Credentials File", description: "AWS credentials file accessible." },
   { path: "/.aws/config", severity: "high", category: "cloud", title: "AWS Config File", description: "AWS configuration file accessible." },
   { path: "/terraform.tfstate", severity: "critical", category: "cloud", title: "Terraform State", description: "Terraform state file may contain secrets." },
-  { path: "/terraform.tfvars", severity: "critical", category: "cloud", title: "Terraform Variables", description: "Terraform variables file may contain secrets." }
+  { path: "/terraform.tfvars", severity: "critical", category: "cloud", title: "Terraform Variables", description: "Terraform variables file may contain secrets." },
+
+  // ── Git Deep Read ──
+  { path: "/.git/COMMIT_EDITMSG", severity: "high", category: "vcs", title: "Git Commit Message Exposed", description: "Last commit message accessible. Confirms full .git exposure." },
+  { path: "/.git/index", severity: "critical", category: "vcs", title: "Git Index Exposed", description: "Git index file accessible. Full source tree can be reconstructed." },
+  { path: "/.git/packed-refs", severity: "high", category: "vcs", title: "Git Packed Refs Exposed", description: "All branch and tag SHA references accessible." },
+  { path: "/.git/refs/heads/main", severity: "high", category: "vcs", title: "Git Main Branch Ref", description: "Current commit SHA of main branch accessible." },
+  { path: "/.git/refs/heads/master", severity: "high", category: "vcs", title: "Git Master Branch Ref", description: "Current commit SHA of master branch accessible." },
+  { path: "/.git/objects/info/packs", severity: "critical", category: "vcs", title: "Git Pack Info Exposed", description: "Git pack info accessible. Enables full repository download with git-dumper." },
+
+  // ── Webpack / Build Artifacts ──
+  { path: "/asset-manifest.json", severity: "medium", category: "config-file", title: "Asset Manifest Exposed", description: "React/Webpack asset manifest reveals all JS/CSS entry points." },
+  { path: "/manifest.json", severity: "low", category: "config-file", title: "Web App Manifest", description: "Web app manifest found. Reveals app metadata." },
+  { path: "/stats.json", severity: "medium", category: "config-file", title: "Webpack Stats Exposed", description: "Webpack stats file reveals module structure and file paths." },
+  { path: "/_next/buildManifest.js", severity: "medium", category: "config-file", title: "Next.js Build Manifest", description: "Next.js build manifest reveals ALL page and API routes." },
+  { path: "/_next/routes-manifest.json", severity: "medium", category: "config-file", title: "Next.js Routes Manifest", description: "Next.js routes manifest with dynamic routes and rewrites." },
+
+  // ── Service Workers ──
+  { path: "/sw.js", severity: "low", category: "config-file", title: "Service Worker", description: "Service worker found. May contain cached API endpoints and routing logic." },
+  { path: "/service-worker.js", severity: "low", category: "config-file", title: "Service Worker", description: "Service worker found. May contain cached API endpoints." },
+  { path: "/firebase-messaging-sw.js", severity: "low", category: "config-file", title: "Firebase Service Worker", description: "Firebase messaging service worker found." },
+
+  // ── Additional Infra ──
+  { path: "/debug/vars", severity: "high", category: "server-info", title: "Go expvar Endpoint", description: "Go expvar debug endpoint exposes runtime variables." },
+  { path: "/.dockerenv", severity: "low", category: "server-info", title: "Docker Environment", description: "Running inside Docker container." },
+  { path: "/wp-json/wp/v2/users", severity: "medium", category: "admin", title: "WordPress User Enumeration", description: "WordPress REST API user listing accessible." },
+  { path: "/api/v1/namespaces", severity: "critical", category: "cloud", title: "Kubernetes API Accessible", description: "Kubernetes API server endpoint accessible. Critical misconfiguration." },
+  { path: "/.env.staging", severity: "high", category: "config-file", title: ".env.staging Exposed", description: "Staging environment file accessible." },
+  { path: "/.env.test", severity: "medium", category: "config-file", title: ".env.test Exposed", description: "Test environment file accessible." },
+  { path: "/info", severity: "low", category: "server-info", title: "Info Endpoint", description: "Application info endpoint accessible." },
+  { path: "/version", severity: "low", category: "server-info", title: "Version Endpoint", description: "Application version endpoint accessible." }
 ];
 
 if (typeof globalThis !== "undefined") {
