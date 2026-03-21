@@ -6,7 +6,7 @@ const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
 function createFinding({ severity, category, title, description, match, location, context }) {
   return {
-    id: "f_" + Math.abs(hashStr(`${category}:${match}:${location}`)).toString(36),
+    id: "f_" + hashStr(`${category}:${match}:${location}`),
     severity: severity || "info",
     category: category || "unknown",
     title: title || "Unknown Finding",
@@ -19,12 +19,16 @@ function createFinding({ severity, category, title, description, match, location
 }
 
 function hashStr(str) {
-  let hash = 0;
+  // FNV-1a inspired hash with better distribution than DJB2
+  let h1 = 0x811c9dc5 >>> 0;
+  let h2 = 0x01000193 >>> 0;
   for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0;
+    const c = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (c + i), 0x0100019d) >>> 0;
   }
-  return hash;
+  // Combine both halves into a larger key space to reduce collisions
+  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
 }
 
 function truncate(str, max) {

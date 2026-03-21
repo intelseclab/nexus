@@ -7,7 +7,23 @@ importScripts("scanner/patterns.js", "scanner/finding.js", "scanner/path-list.js
 
 // ── State ──
 function createEmptyTabFindings(url = "", status = "idle") {
-  return { content: [], network: [], jsFiles: [], paths: [], url, status, pendingScans: 0 };
+  return {
+    content: [], network: [], jsFiles: [], paths: [],
+    url, status, pendingScans: 0,
+    scanSummary: { headersAnalyzed: false, jsFilesScanned: 0, pathsProbed: 0, totalPaths: SENSITIVE_PATHS.length }
+  };
+}
+
+// ── Atomic Storage Queue ──
+// Prevents race conditions from concurrent read-modify-write cycles
+const storageQueue = new Map();
+
+function withTabLock(tabId, fn) {
+  const key = `tab_${tabId}`;
+  const prev = storageQueue.get(key) || Promise.resolve();
+  const next = prev.then(() => fn()).catch(e => console.warn("[Nexus] Storage error:", e));
+  storageQueue.set(key, next);
+  return next;
 }
 
 async function getTabFindings(tabId) {
@@ -23,15 +39,24 @@ async function saveTabFindings(tabId, findings) {
 }
 
 async function mergeFindings(tabId, category, newFindings, url) {
-  const existing = await getTabFindings(tabId);
-  existing[category] = newFindings;
-  if (url) existing.url = url;
-  // Decrement pending scan counter; mark complete only when all phases done
-  if (existing.pendingScans > 0) existing.pendingScans--;
-  if (existing.pendingScans <= 0 && existing.status === "scanning") {
-    existing.status = "complete";
-  }
-  await saveTabFindings(tabId, existing);
+  return withTabLock(tabId, async () => {
+    const existing = await getTabFindings(tabId);
+    existing[category] = newFindings;
+    if (url) existing.url = url;
+    if (existing.pendingScans > 0) existing.pendingScans--;
+    if (existing.pendingScans <= 0 && existing.status === "scanning") {
+      existing.status = "complete";
+    }
+    await saveTabFindings(tabId, existing);
+  });
+}
+
+async function updateScanSummary(tabId, updates) {
+  return withTabLock(tabId, async () => {
+    const existing = await getTabFindings(tabId);
+    Object.assign(existing.scanSummary, updates);
+    await saveTabFindings(tabId, existing);
+  });
 }
 
 function getAllFindings(tabData) {
@@ -41,6 +66,25 @@ function getAllFindings(tabData) {
     ...(tabData.jsFiles || []),
     ...(tabData.paths || [])
   ];
+}
+
+// ── AbortController Tracking ──
+// Allows scan cancellation on navigation or tab close
+const activeScanControllers = new Map();
+
+function createScanAbort(tabId) {
+  cancelScan(tabId);
+  const controller = new AbortController();
+  activeScanControllers.set(tabId, controller);
+  return controller.signal;
+}
+
+function cancelScan(tabId) {
+  const existing = activeScanControllers.get(tabId);
+  if (existing) {
+    existing.abort();
+    activeScanControllers.delete(tabId);
+  }
 }
 
 // ── Badge ──
@@ -68,7 +112,6 @@ function updateBadge(tabId, tabData) {
 }
 
 // ── Header Cache ──
-// Cache headers per tab so we can scan them when the user requests a scan.
 const cachedHeaders = new Map();
 
 chrome.webRequest.onHeadersReceived.addListener(
@@ -165,21 +208,21 @@ function scanHeaders(tabId, headers, url) {
         severity: "critical", category: "cors",
         title: "CORS: Wildcard + Credentials",
         description: "Wildcard origin with credentials allowed. Critical misconfiguration.",
-        match: `ACAO: * + ACAC: true`, location: url
+        match: "ACAO: * + ACAC: true", location: url
       }));
     } else if (acao === "*") {
       findings.push(createFinding({
         severity: "medium", category: "cors",
         title: "CORS: Wildcard Origin",
         description: "Access-Control-Allow-Origin set to wildcard (*).",
-        match: `ACAO: *`, location: url
+        match: "ACAO: *", location: url
       }));
     } else if (acao === "null") {
       findings.push(createFinding({
         severity: "high", category: "cors",
         title: "CORS: null Origin Allowed",
         description: "Access-Control-Allow-Origin allows 'null' which is exploitable.",
-        match: `ACAO: null`, location: url
+        match: "ACAO: null", location: url
       }));
     }
   }
@@ -206,17 +249,15 @@ function scanHeaders(tabId, headers, url) {
       }));
     }
 
-    // Cookie with __Secure- prefix check
     if (cookieName.startsWith("__Secure-") && !flags.includes("secure")) {
       findings.push(createFinding({
         severity: "high", category: "cookie",
-        title: `__Secure- Cookie Without Secure`,
+        title: "__Secure- Cookie Without Secure",
         description: `${cookieName} uses __Secure- prefix but lacks Secure flag.`,
         match: cookieName, location: url
       }));
     }
 
-    // Cookie with __Host- prefix check (requires Secure, Path=/, no Domain)
     if (cookieName.startsWith("__Host-")) {
       const hostIssues = [];
       if (!flags.includes("secure")) hostIssues.push("Secure");
@@ -225,7 +266,7 @@ function scanHeaders(tabId, headers, url) {
       if (hostIssues.length > 0) {
         findings.push(createFinding({
           severity: "high", category: "cookie",
-          title: `__Host- Cookie Violation`,
+          title: "__Host- Cookie Violation",
           description: `${cookieName} uses __Host- prefix but violates requirements: ${hostIssues.join(", ")}.`,
           match: cookieName, location: url
         }));
@@ -235,7 +276,6 @@ function scanHeaders(tabId, headers, url) {
 
   // ── Header-based Technology Fingerprinting ──
   const techFingerprints = [
-    // PaaS & Hosting
     { check: () => headerMap["server"]?.toLowerCase().includes("github.com") || headerMap["x-github-request-id"], name: "GitHub Pages", description: "GitHub Pages hosting detected via headers." },
     { check: () => headerMap["x-vercel-id"] || headerMap["server"]?.toLowerCase() === "vercel", name: "Vercel", description: "Vercel hosting detected via headers." },
     { check: () => headerMap["x-netlify-request-id"] || headerMap["server"]?.toLowerCase() === "netlify", name: "Netlify", description: "Netlify hosting detected via headers." },
@@ -244,25 +284,20 @@ function scanHeaders(tabId, headers, url) {
     { check: () => headerMap["x-goog-generation"] || headerMap["x-guploader-uploadid"], name: "Google Cloud Storage", description: "Google Cloud Storage detected via headers." },
     { check: () => /fly-request-id|fly\.io/i.test(headerMap["server"] || ""), name: "Fly.io", description: "Fly.io hosting detected via headers." },
     { check: () => headerMap["x-render-origin-server"], name: "Render", description: "Render hosting detected via headers." },
-    // CDN
     { check: () => headerMap["x-fastly-request-id"] || headerMap["x-served-by"]?.includes("cache-"), name: "Fastly", description: "Fastly CDN detected via headers." },
     { check: () => headerMap["cf-ray"] || headerMap["cf-cache-status"], name: "Cloudflare", description: "Cloudflare CDN detected via headers." },
     { check: () => headerMap["x-cdn"]?.toLowerCase().includes("akamai") || headerMap["x-akamai-transformed"], name: "Akamai", description: "Akamai CDN detected via headers." },
     { check: () => headerMap["x-sucuri-id"] || headerMap["x-sucuri-cache"], name: "Sucuri", description: "Sucuri WAF/CDN detected via headers." },
-    // Caching / Proxy
     { check: () => headerMap["x-varnish"] || (headerMap["via"] && /varnish/i.test(headerMap["via"])), name: "Varnish", description: "Varnish caching proxy detected via headers.", extra: () => { const via = headerMap["via"] || ""; const m = via.match(/varnish[\/\s]*([0-9.]+)/i) || headerMap["x-varnish"]?.match(/([0-9.]+)/); return m ? m[1] : null; } },
-    // Web servers
     { check: () => /^nginx/i.test(headerMap["server"] || ""), name: "Nginx", description: "Nginx web server detected.", extra: () => { const m = (headerMap["server"] || "").match(/nginx[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
     { check: () => /^apache/i.test(headerMap["server"] || ""), name: "Apache", description: "Apache web server detected.", extra: () => { const m = (headerMap["server"] || "").match(/apache[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
     { check: () => /^LiteSpeed/i.test(headerMap["server"] || ""), name: "LiteSpeed", description: "LiteSpeed web server detected." },
     { check: () => /^openresty/i.test(headerMap["server"] || ""), name: "OpenResty", description: "OpenResty (Nginx+Lua) detected." },
     { check: () => /Microsoft-IIS/i.test(headerMap["server"] || ""), name: "IIS", description: "Microsoft IIS detected.", extra: () => { const m = (headerMap["server"] || "").match(/IIS[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
-    // Languages & Frameworks (via headers)
     { check: () => /^PHP/i.test(headerMap["x-powered-by"] || ""), name: "PHP", description: "PHP detected via X-Powered-By header.", extra: () => { const m = (headerMap["x-powered-by"] || "").match(/PHP[\/\s]*([0-9.]+)/i); return m ? m[1] : null; } },
     { check: () => /express/i.test(headerMap["x-powered-by"] || ""), name: "Express", description: "Express.js framework detected via headers." },
     { check: () => /^next\.js/i.test(headerMap["x-powered-by"] || ""), name: "Next.js", description: "Next.js detected via X-Powered-By header." },
     { check: () => headerMap["x-drupal-cache"] || headerMap["x-drupal-dynamic-cache"], name: "Drupal", description: "Drupal CMS detected via headers." },
-    // Security
     { check: () => headerMap["strict-transport-security"], name: "HSTS", description: "HTTP Strict Transport Security enabled." },
   ];
 
@@ -304,12 +339,13 @@ function scanHeaders(tabId, headers, url) {
     }));
   }
 
+  updateScanSummary(tabId, { headersAnalyzed: true });
   mergeFindings(tabId, "network", findings, url);
 }
 
 // ── JS File Scanner ──
 
-async function scanJsFiles(tabId, urls) {
+async function scanJsFiles(tabId, urls, signal) {
   const findings = [];
   const maxFiles = 30;
   const maxSize = 2 * 1024 * 1024;
@@ -324,17 +360,26 @@ async function scanJsFiles(tabId, urls) {
     SCAN_PATTERNS.domSecurity
   ];
 
+  let scannedCount = 0;
   for (const url of filesToScan) {
+    if (signal.aborted) break;
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
+      // Chain with parent signal so navigation cancels in-flight fetches
+      const onAbort = () => controller.abort();
+      signal.addEventListener("abort", onAbort, { once: true });
+
       const response = await fetch(url, { credentials: "omit", signal: controller.signal });
       clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
+
       if (!response.ok) continue;
 
       let text = await response.text();
       if (text.length > maxSize) text = text.substring(0, maxSize);
+      scannedCount++;
 
       for (const patterns of scanGroups) {
         for (const p of patterns) {
@@ -361,108 +406,125 @@ async function scanJsFiles(tabId, urls) {
         }
       }
     } catch (err) {
-      // Skip failed fetches
+      if (signal.aborted) break;
     }
   }
 
+  updateScanSummary(tabId, { jsFilesScanned: scannedCount });
   mergeFindings(tabId, "jsFiles", deduplicateFindings(findings));
 }
 
-// ── Path Checker ──
+// ── Path Checker (Concurrent) ──
 
-async function probePaths(tabId, origin) {
+async function probePaths(tabId, origin, signal) {
   const findings = [];
+  const CONCURRENCY = 5;
   const delay = ms => new Promise(r => setTimeout(r, ms));
-  let currentDelay = 200;
 
   // Detect if the site is an SPA (returns 200 for everything)
   let isSpa = false;
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 5000);
-    const testResp = await fetch(origin + "/__exposedinfos_test_404_" + Date.now(), {
+    const onAbort = () => controller.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    const testResp = await fetch(origin + "/__nexus_spa_test_" + Date.now(), {
       method: "GET", credentials: "omit", redirect: "manual", signal: controller.signal
     });
     clearTimeout(tid);
+    signal.removeEventListener("abort", onAbort);
+
     if (testResp.status === 200) {
       const body = await testResp.text();
-      // If a random URL returns 200 with HTML, it's an SPA catch-all
       if (body.includes("<!doctype") || body.includes("<!DOCTYPE") || body.includes("<html")) {
         isSpa = true;
       }
     }
   } catch (e) { /* proceed without SPA detection */ }
 
-  let retryCount = 0;
-  const MAX_RETRIES = 3;
-  for (let i = 0; i < SENSITIVE_PATHS.length; i++) {
-    const entry = SENSITIVE_PATHS[i];
-    try {
-      const url = origin + entry.path;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+  if (signal.aborted) {
+    mergeFindings(tabId, "paths", []);
+    return;
+  }
 
-      const response = await fetch(url, {
-        method: "GET", credentials: "omit", redirect: "manual",
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+  let nextIdx = 0;
+  let probedCount = 0;
 
-      // Back off on rate limiting and retry the same path (max 3 retries)
-      if (response.status === 429) {
-        if (retryCount < MAX_RETRIES) {
-          retryCount++;
-          currentDelay = Math.min(currentDelay * 2, 5000);
-          await delay(currentDelay);
-          i--; // retry same path
-          continue;
+  async function worker() {
+    while (!signal.aborted) {
+      const i = nextIdx++;
+      if (i >= SENSITIVE_PATHS.length) break;
+
+      const entry = SENSITIVE_PATHS[i];
+      let retries = 0;
+      const MAX_RETRIES = 3;
+
+      while (retries <= MAX_RETRIES && !signal.aborted) {
+        try {
+          const url = origin + entry.path;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const onAbort = () => controller.abort();
+          signal.addEventListener("abort", onAbort, { once: true });
+
+          const response = await fetch(url, {
+            method: "GET", credentials: "omit", redirect: "manual",
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          signal.removeEventListener("abort", onAbort);
+          probedCount++;
+
+          if (response.status === 429 && retries < MAX_RETRIES) {
+            retries++;
+            await delay(Math.min(200 * Math.pow(2, retries), 5000));
+            continue;
+          }
+
+          if (response.status === 200) {
+            const contentType = response.headers.get("content-type") || "";
+            const body = await response.text();
+            const bodyPreview = body.substring(0, 1000);
+
+            const expectsHtml = entry.path.endsWith(".html") || entry.path.endsWith(".php") || entry.path.endsWith("/");
+            if (isSpa && !expectsHtml && contentType.includes("text/html")) break;
+
+            const isErrorPage =
+              (bodyPreview.includes("<title>404") || bodyPreview.includes("<title>Not Found") ||
+               bodyPreview.includes("Page not found") || bodyPreview.includes("page not found") ||
+               bodyPreview.includes("does not exist") || bodyPreview.includes("cannot be found"));
+            if (isErrorPage) break;
+
+            if (body.length < 5) break;
+
+            if (entry.category === "config-file" || entry.category === "vcs" || entry.category === "backup") {
+              if (contentType.includes("text/html") && !expectsHtml) break;
+            }
+
+            findings.push(createFinding({
+              severity: entry.severity, category: entry.category,
+              title: entry.title, description: entry.description,
+              match: `${url} (HTTP 200, ${contentType || "unknown"})`,
+              location: url,
+              context: bodyPreview.substring(0, 200)
+            }));
+          }
+          break; // success or non-429 response, move on
+        } catch (err) {
+          if (signal.aborted) return;
+          break;
         }
-        // Max retries exceeded, skip this path
-        retryCount = 0;
-        continue;
-      }
-      retryCount = 0;
-
-      if (response.status === 200) {
-        const contentType = response.headers.get("content-type") || "";
-        const body = await response.text();
-        const bodyPreview = body.substring(0, 1000);
-
-        // Skip if SPA catch-all and it returned HTML (unless we expect HTML)
-        const expectsHtml = entry.path.endsWith(".html") || entry.path.endsWith(".php") || entry.path.endsWith("/");
-        if (isSpa && !expectsHtml && contentType.includes("text/html")) continue;
-
-        // Skip generic error pages
-        const isErrorPage =
-          (bodyPreview.includes("<title>404") || bodyPreview.includes("<title>Not Found") ||
-           bodyPreview.includes("Page not found") || bodyPreview.includes("page not found") ||
-           bodyPreview.includes("does not exist") || bodyPreview.includes("cannot be found"));
-        if (isErrorPage) continue;
-
-        // Skip empty responses
-        if (body.length < 5) continue;
-
-        // For config files, verify content looks legitimate
-        if (entry.category === "config-file" || entry.category === "vcs" || entry.category === "backup") {
-          // If content-type is HTML and we expect a config file, skip
-          if (contentType.includes("text/html") && !expectsHtml) continue;
-        }
-
-        findings.push(createFinding({
-          severity: entry.severity, category: entry.category,
-          title: entry.title, description: entry.description,
-          match: `${url} (HTTP 200, ${contentType || "unknown"})`,
-          location: url,
-          context: bodyPreview.substring(0, 200)
-        }));
       }
 
-      await delay(currentDelay);
-    } catch (err) {
-      // Timeout or network error
+      // Small delay between requests per worker to avoid hammering
+      await delay(100);
     }
   }
 
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
+  updateScanSummary(tabId, { pathsProbed: probedCount });
   mergeFindings(tabId, "paths", deduplicateFindings(findings));
 }
 
@@ -473,31 +535,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "CONTENT_FINDINGS") {
     if (tabId) {
-      // Calculate extra pending phases: paths + jsFiles (if any)
       const hasJsFiles = message.jsFileUrls && message.jsFileUrls.length > 0;
-      const extraPending = 1 + (hasJsFiles ? 1 : 0); // +1 paths, +1 jsFiles if present
+      const extraPending = 1 + (hasJsFiles ? 1 : 0);
 
-      getTabFindings(tabId).then(existing => {
+      // Retrieve or create the scan signal for this tab
+      let signal = activeScanControllers.get(tabId)?.signal;
+      if (!signal || signal.aborted) {
+        signal = createScanAbort(tabId);
+      }
+
+      withTabLock(tabId, async () => {
+        const existing = await getTabFindings(tabId);
         existing.pendingScans = (existing.pendingScans || 0) + extraPending;
-        saveTabFindings(tabId, existing).then(() => {
-          // Merge content findings (decrements 1 pending)
-          mergeFindings(tabId, "content", message.findings, message.url).then(() => {
-            // Start JS file scanning sequentially after content save
-            if (hasJsFiles) {
-              scanJsFiles(tabId, message.jsFileUrls);
-            }
-            // Start path probing
-            if (sender.tab?.url) {
-              try {
-                const origin = new URL(sender.tab.url).origin;
-                probePaths(tabId, origin);
-              } catch (e) {
-                mergeFindings(tabId, "paths", []);
-              }
-            } else {
+        await saveTabFindings(tabId, existing);
+      }).then(() => {
+        mergeFindings(tabId, "content", message.findings, message.url).then(() => {
+          if (hasJsFiles) {
+            scanJsFiles(tabId, message.jsFileUrls, signal);
+          }
+          if (sender.tab?.url) {
+            try {
+              const origin = new URL(sender.tab.url).origin;
+              probePaths(tabId, origin, signal);
+            } catch (e) {
               mergeFindings(tabId, "paths", []);
             }
-          });
+          } else {
+            mergeFindings(tabId, "paths", []);
+          }
         });
       });
     }
@@ -513,23 +578,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           findings: sortFindings(all),
           summary: getSeverityCounts(all),
           url: tabData.url,
-          status: tabData.status || "idle"
+          status: tabData.status || "idle",
+          scanSummary: tabData.scanSummary || {}
         });
       });
-      return true; // MUST return true for async sendResponse
+      return true;
     }
-    sendResponse({ findings: [], summary: {}, url: "", status: "idle" });
+    sendResponse({ findings: [], summary: {}, url: "", status: "idle", scanSummary: {} });
     return false;
   }
 
   if (message.type === "REQUEST_SCAN") {
     if (message.tabId) {
       const tabId = message.tabId;
-      // pendingScans: 2 = content scan + header scan (paths and jsFiles add their own later)
+      const signal = createScanAbort(tabId);
+
       const initial = createEmptyTabFindings("", "scanning");
       initial.pendingScans = 2;
       saveTabFindings(tabId, initial).then(() => {
-        // Scan cached headers for this tab (must await initial save first)
         const cached = cachedHeaders.get(tabId);
         if (cached) {
           scanHeaders(tabId, cached.headers, cached.url);
@@ -560,26 +626,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ── Cleanup ──
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  cancelScan(tabId);
   chrome.storage.session.remove(`tab_${tabId}`);
   cachedHeaders.delete(tabId);
+  storageQueue.delete(`tab_${tabId}`);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
+    cancelScan(tabId);
+
     chrome.tabs.get(tabId, (tab) => {
       if (chrome.runtime.lastError || !tab) return;
-      
+
       getTabFindings(tabId).then(data => {
         const currentUrl = tab.url;
         const storedUrl = data.url;
-        
-        // Only clear findings if navigating to a different URL
+
         if (currentUrl && storedUrl && currentUrl !== storedUrl) {
-          // Navigating to new page - clear all findings
           saveTabFindings(tabId, createEmptyTabFindings(currentUrl, "idle"));
         }
-        // For same-page reloads: keep findings visible, clear only paths
-        // New content/network/JS findings will merge in as they arrive
       });
     });
   }

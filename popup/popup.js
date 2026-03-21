@@ -62,7 +62,11 @@
   const btnExportJson = document.getElementById("btn-export-json");
   const btnExportHtml = document.getElementById("btn-export-html");
   const btnStartScan = document.getElementById("btn-start-scan");
+  const btnExportCsv = document.getElementById("btn-export-csv");
   const startScanState = document.getElementById("start-scan-state");
+  const scanSummaryEl = document.getElementById("scan-summary");
+  const scanSummaryText = document.getElementById("scan-summary-text");
+  const versionLabel = document.getElementById("version-label");
 
   const severityCounts = {
     critical: document.getElementById("count-critical"),
@@ -72,22 +76,58 @@
     info: document.getElementById("count-info")
   };
 
+  // ── Remediation Hints ──
+  const REMEDIATION = {
+    "api-key": "Rotate the exposed key immediately and restrict its permissions. Move secrets to environment variables or a vault.",
+    "credential": "Change the exposed credential. Never hardcode secrets in source code; use a secrets manager.",
+    "info-leak": "Remove internal references from public-facing code. Review build pipeline for data leakage.",
+    "debug": "Disable debug mode and remove debug statements before deploying to production.",
+    "env-var": "Ensure environment variables with sensitive values are not bundled into client-side builds.",
+    "endpoint": "Review exposed endpoints for proper authentication and authorization controls.",
+    "sourcemap": "Remove source maps from production builds or restrict access via server configuration.",
+    "comment": "Remove sensitive HTML comments before deployment. Use build tools to strip comments.",
+    "hidden-input": "Ensure hidden inputs do not expose tokens or secrets. Use server-side session management.",
+    "meta-info": "Remove sensitive meta tags. Generator tags reveal technology versions to attackers.",
+    "security-header": "Configure your web server or CDN to set the missing security headers.",
+    "server-info": "Suppress version disclosure headers (Server, X-Powered-By) in your server configuration.",
+    "cors": "Restrict Access-Control-Allow-Origin to specific trusted domains. Never use wildcard with credentials.",
+    "cookie": "Set Secure, HttpOnly, and SameSite flags on all cookies, especially session cookies.",
+    "config-file": "Block access to configuration files via server rules (e.g., nginx location blocks).",
+    "vcs": "Remove .git and other VCS directories from the web root. Add server rules to deny access.",
+    "api-docs": "Restrict API documentation access to authenticated users or internal networks.",
+    "admin": "Protect admin panels with strong authentication, IP allowlisting, or VPN access.",
+    "backup": "Remove backup and log files from the web root. Store them in a secure, non-public location.",
+    "cicd": "Remove CI/CD configuration files from the web root or restrict access.",
+    "cloud": "Remove cloud credential files from the web root immediately. Rotate affected credentials.",
+    "dom-security": "Sanitize user-controlled input before using it in DOM manipulation. Use textContent instead of innerHTML.",
+    "transport": "Migrate all resources and form actions to HTTPS. Enable HSTS to enforce secure connections.",
+    "standard": "Review robots.txt and sitemap for unintended path disclosure."
+  };
+
   // ── Init ──
   async function init() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) return;
 
+    // Set version from manifest (single source of truth)
+    const manifest = chrome.runtime.getManifest();
+    if (versionLabel) versionLabel.textContent = `v${manifest.version}`;
+
     targetUrlText.textContent = tab.url || "Unknown";
-    
+
     // Initial state: scan status hidden
     scanStatus.style.display = "none";
-    
+
     // Load existing findings immediately
     loadFindings(tab.id);
-    
-    // Poll for updates as scans complete
-    const pollInterval = setInterval(() => loadFindings(tab.id), 2000);
-    setTimeout(() => clearInterval(pollInterval), 60000);
+
+    // Event-driven updates via storage changes (replaces polling)
+    const storageKey = `tab_${tab.id}`;
+    chrome.storage.session.onChanged.addListener((changes) => {
+      if (changes[storageKey]) {
+        loadFindings(tab.id);
+      }
+    });
 
     // Event listeners
     btnRescan.addEventListener("click", () => rescan(tab.id));
@@ -99,6 +139,7 @@
     document.addEventListener("click", () => exportMenu.classList.remove("show"));
     btnExportJson.addEventListener("click", () => { exportMenu.classList.remove("show"); exportJson(); });
     btnExportHtml.addEventListener("click", () => { exportMenu.classList.remove("show"); exportHtml(); });
+    if (btnExportCsv) btnExportCsv.addEventListener("click", () => { exportMenu.classList.remove("show"); exportCsv(); });
     searchInput.addEventListener("input", applyFilters);
     categoryFilter.addEventListener("change", applyFilters);
 
@@ -130,7 +171,7 @@
 
       const newFindings = response.findings || [];
       const status = response.status || "idle";
-      
+
       allFindings = newFindings;
       currentUrl = response.url || "";
 
@@ -142,16 +183,27 @@
       updateCategoryFilter();
       renderSiteProfile();
       renderFindings();
-      
+      renderScanSummary(response.scanSummary || {}, status);
+
+      // Re-enable rescan button when scan completes
+      if (status === "complete" || status === "idle") {
+        btnRescan.disabled = false;
+        if (btnStartScan) btnStartScan.disabled = false;
+        // Safe: only static icon HTML, no user data
+        btnRescan.textContent = "";
+        const icon = document.createElement("i");
+        icon.className = "fa-solid fa-rotate";
+        btnRescan.appendChild(icon);
+        btnRescan.appendChild(document.createTextNode(" Rescan"));
+      }
+
       // Visibility Logic based on Status & Findings
       if (newFindings.length > 0) {
-        // Has findings: Show list, hide prompts
         if (startScanState) startScanState.style.display = "none";
         emptyState.style.display = "none";
         scanStatus.style.display = (status === "scanning") ? "flex" : "none";
         findingsList.style.display = "block";
       } else {
-        // No findings: Handle states
         findingsList.style.display = "none";
         const profileEl = document.getElementById("site-profile");
         if (profileEl) profileEl.style.display = "none";
@@ -161,18 +213,34 @@
           emptyState.style.display = "none";
           scanStatus.style.display = "flex";
         } else if (status === "complete") {
-          // Finished scan, found nothing
           if (startScanState) startScanState.style.display = "none";
           emptyState.style.display = "flex";
           scanStatus.style.display = "none";
         } else {
-          // Idle / Not Scanned
           if (startScanState) startScanState.style.display = "flex";
           emptyState.style.display = "none";
           scanStatus.style.display = "none";
         }
       }
     });
+  }
+
+  function renderScanSummary(summary, status) {
+    if (!scanSummaryEl || !scanSummaryText) return;
+    if (status === "idle" && !summary.headersAnalyzed) {
+      scanSummaryEl.style.display = "none";
+      return;
+    }
+    const parts = [];
+    if (summary.headersAnalyzed) parts.push("Headers");
+    if (summary.jsFilesScanned > 0) parts.push(`${summary.jsFilesScanned} JS files`);
+    if (summary.pathsProbed > 0) parts.push(`${summary.pathsProbed}/${summary.totalPaths || "?"} paths`);
+    if (parts.length === 0) {
+      scanSummaryEl.style.display = "none";
+      return;
+    }
+    scanSummaryText.textContent = `Scanned: ${parts.join(" \u00B7 ")}`;
+    scanSummaryEl.style.display = "flex";
   }
 
   function updateSummary(summary) {
@@ -548,6 +616,12 @@
           <span class="detail-label"><i class="fa-solid fa-location-dot"></i> Location</span>
           <span class="detail-value">${escapeHtml(finding.location)}</span>
         </div>
+        ${REMEDIATION[finding.category] ? `
+        <div class="detail-row">
+          <span class="detail-label"><i class="fa-solid fa-lightbulb"></i> Remediation</span>
+          <span class="detail-value remediation-value">${escapeHtml(REMEDIATION[finding.category])}</span>
+        </div>
+        ` : ""}
         <div class="finding-actions">
           <button class="btn-copy" data-copy="${escapeAttr(finding.match)}" data-label="Copy Match">
             <i class="fa-regular fa-copy"></i> Copy Match
@@ -598,28 +672,30 @@
   // ── Actions ──
   function rescan(tabId) {
     btnRescan.disabled = true;
-    btnRescan.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning...';
+    // Safe DOM: only static icon, no user data
+    btnRescan.textContent = "";
+    const spinIcon = document.createElement("i");
+    spinIcon.className = "fa-solid fa-spinner fa-spin";
+    btnRescan.appendChild(spinIcon);
+    btnRescan.appendChild(document.createTextNode(" Scanning..."));
+
     if (btnStartScan) btnStartScan.disabled = true;
     if (startScanState) startScanState.style.display = "none";
     emptyState.style.display = "none";
     findingsList.style.display = "none";
     scanStatus.style.display = "flex";
+    if (scanSummaryEl) scanSummaryEl.style.display = "none";
     expandedIds.clear();
 
     chrome.runtime.sendMessage({ type: "REQUEST_SCAN", tabId }, () => {
-      setTimeout(() => {
-        btnRescan.disabled = false;
-        if (btnStartScan) btnStartScan.disabled = false;
-        btnRescan.innerHTML = '<i class="fa-solid fa-rotate"></i> Rescan';
-        loadFindings(tabId);
-      }, 2000);
+      // Button re-enabled by loadFindings when status becomes "complete"
     });
   }
 
   function getReportData() {
     return {
       tool: "Nexus Scanner",
-      version: "1.0.2",
+      version: chrome.runtime.getManifest().version,
       url: currentUrl,
       scanDate: new Date().toISOString(),
       summary: {
@@ -630,7 +706,9 @@
         low: allFindings.filter(f => f.severity === "low").length,
         info: allFindings.filter(f => f.severity === "info").length
       },
-      findings: allFindings
+      findings: allFindings,
+      github: "https://github.com/intelseclab",
+      repository: "https://github.com/intelseclab/nexus"
     };
   }
 
@@ -655,6 +733,27 @@
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     downloadBlob(blob, `${getFilePrefix()}.json`);
     showToast("JSON report exported");
+  }
+
+  function exportCsv() {
+    const report = getReportData();
+    const headers = ["Severity", "Category", "Title", "Description", "Match", "Location", "Context"];
+    const csvEscape = (str) => {
+      if (!str) return "";
+      const s = String(str).replace(/"/g, '""');
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+    };
+    const rows = [headers.join(",")];
+    for (const f of report.findings) {
+      rows.push([
+        csvEscape(f.severity), csvEscape(f.category), csvEscape(f.title),
+        csvEscape(f.description), csvEscape(f.match), csvEscape(f.location),
+        csvEscape(f.context)
+      ].join(","));
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    downloadBlob(blob, `${getFilePrefix()}.csv`);
+    showToast("CSV report exported");
   }
 
   function exportHtml() {
@@ -725,17 +824,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Recon Report // ${escapeHtml(hostname)}</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous"/>
+<!-- Self-contained: no external resources for privacy -->
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 :root {
   --bg-0: #0a0a0f; --bg-1: #101018; --bg-2: #16161f; --bg-3: #1e1e2a;
   --border: #252535; --border-l: #2f2f42;
   --text: #b8bcc8; --text-dim: #6b7084; --text-bright: #e2e4ea;
   --accent: #7c6aef; --accent-dim: rgba(124,106,239,0.1);
   --red: #e63946; --orange: #e67e22; --yellow: #c8a92e; --blue: #5b7fa5; --green: #38a169; --gray: #4a5568;
-  --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
-  --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg-0); color:var(--text); font-family:var(--sans); font-size:13px; line-height:1.6; }
@@ -815,6 +913,8 @@ th { text-align:left; padding:8px 10px; font-size:9px; text-transform:uppercase;
 /* ── Footer ── */
 .rpt-footer { max-width:1100px; margin:0 auto; padding:20px 32px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
 .rpt-footer-left { font-size:10px; color:var(--text-dim); font-family:var(--mono); }
+.rpt-footer-center { font-size:10px; }
+.rpt-footer-center a:hover { text-decoration:underline !important; }
 .rpt-footer-right { font-size:10px; color:var(--text-dim); }
 
 /* ── Print ── */
@@ -838,10 +938,8 @@ th { text-align:left; padding:8px 10px; font-size:9px; text-transform:uppercase;
 
 <div class="topbar">
   <div class="topbar-inner">
-    <div class="topbar-brand">
-      <img src="data:image/png;base64,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" style="width:24px;height:24px;vertical-align:middle;margin-right:10px;"> Nexus
-    </div>
-    <div class="topbar-label">Passive Reconnaissance Report</div>
+    <div class="topbar-brand">\u25C9 Nexus</div>
+    <div class="topbar-label">Reconnaissance Report</div>
   </div>
 </div>
 
@@ -851,10 +949,10 @@ th { text-align:left; padding:8px 10px; font-size:9px; text-transform:uppercase;
       <div class="hero-label">Target</div>
       <div class="hero-target">${escapeHtml(report.url)}</div>
       <div class="hero-meta">
-        <div class="hero-meta-item"><i class="fa-regular fa-clock"></i> <span>${dateStr} ${timeStr}</span></div>
-        <div class="hero-meta-item"><i class="fa-solid fa-hashtag"></i> <span>${report.summary.total} findings</span></div>
-        <div class="hero-meta-item"><i class="fa-solid fa-code-branch"></i> <span>v${report.version}</span></div>
-        <div class="hero-meta-item"><i class="fa-solid fa-radar"></i> <span>Passive scan</span></div>
+        <div class="hero-meta-item">\u23F1 <span>${dateStr} ${timeStr}</span></div>
+        <div class="hero-meta-item"># <span>${report.summary.total} findings</span></div>
+        <div class="hero-meta-item">\u2387 <span>v${report.version}</span></div>
+        <div class="hero-meta-item">\u25CE <span>Reconnaissance scan</span></div>
       </div>
     </div>
     <div class="hero-right">
@@ -879,12 +977,12 @@ th { text-align:left; padding:8px 10px; font-size:9px; text-transform:uppercase;
 </div>
 
 ${profileHtml ? `<div class="profile"><div class="profile-inner">
-  <div class="profile-title"><i class="fa-solid fa-fingerprint"></i> Reconnaissance Profile</div>
+  <div class="profile-title">\u2299 Reconnaissance Profile</div>
   ${profileHtml}
 </div></div>` : ""}
 
 <div class="findings">
-  <div class="findings-label"><i class="fa-solid fa-list-check"></i> Detailed Findings</div>
+  <div class="findings-label">\u2611 Detailed Findings</div>
   <table>
     <thead><tr><th>#</th><th>Sev</th><th>Finding</th><th>Evidence</th><th>Source</th></tr></thead>
     <tbody>${findingsHtml}</tbody>
@@ -893,7 +991,8 @@ ${profileHtml ? `<div class="profile"><div class="profile-inner">
 
 <div class="rpt-footer">
   <div class="rpt-footer-left">Nexus // ${escapeHtml(hostname)} // ${dateStr}</div>
-  <div class="rpt-footer-right">Passive reconnaissance &mdash; no active exploitation performed</div>
+  <div class="rpt-footer-center"><a href="https://github.com/intelseclab/nexus" style="color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:10px;">\u2605 Star on GitHub</a> &middot; <a href="https://github.com/intelseclab" style="color:var(--text-dim);text-decoration:none;font-size:10px;">Follow @intelseclab</a></div>
+  <div class="rpt-footer-right">Reconnaissance scan &mdash; no active exploitation performed</div>
 </div>
 
 </body>

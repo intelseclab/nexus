@@ -241,6 +241,28 @@ body {
   font-size: 16px;
 }
 
+/* ── Scan Summary ── */
+.scan-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 16px;
+  font-size: 10px;
+  color: #8b949e;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.scan-summary i {
+  color: #58a6ff;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.scan-summary span {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
 /* ── Scroll Area ── */
 .scroll-area {
   flex: 1;
@@ -597,6 +619,15 @@ body {
   white-space: pre-wrap;
 }
 
+.detail-value.remediation-value {
+  font-size: 10px;
+  color: #7ee787;
+  background: rgba(46,160,67,0.08);
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+
 .finding-actions {
   display: flex;
   gap: 6px;
@@ -671,6 +702,25 @@ body {
 
 .footer i {
   color: #58a6ff;
+}
+
+.footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #8b949e;
+  text-decoration: none;
+  font-size: 11px;
+  transition: color 0.15s;
+}
+
+.footer-github:hover {
+  color: #f0f6fc;
+}
+
+.footer-github .fa-star {
+  color: #e3b341;
+  font-size: 9px;
 }
 
 /* ── Category Section Headers ── */
