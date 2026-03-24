@@ -15,9 +15,13 @@ Nexus ("we", "our", or "the extension") is a browser extension developed by Inte
 ## Permissions Usage
 Nexus requires specific browser permissions to function. Here is how they are used:
 
-- **activeTab & scripting:** Used to inject a passive scanner into the current page to detect client-side vulnerabilities (e.g., exposed API keys in DOM). This only happens on pages you visit.
+- **activeTab & scripting:** Used to inject a scanner into the current page to detect client-side vulnerabilities (e.g., exposed API keys in DOM). This only happens on pages you visit and explicitly choose to scan.
 - **webRequest:** Used to analyze HTTP response headers for security misconfigurations (e.g., missing security headers).
-- **storage:** Used to save your settings and temporary findings locally.
+- **host_permissions:** Used to probe sensitive paths (e.g., `.env`, `.git`) and scan external JavaScript files on the target origin. These requests are only made when you initiate a scan.
+- **storage:** Used to save your disclaimer acceptance, settings, and temporary findings locally.
+
+## Legal Notice
+Nexus performs active reconnaissance including HTTP requests to sensitive paths on target websites. On first use, the extension displays a legal disclaimer requiring you to acknowledge that you will only scan targets you are authorized to test. Unauthorized scanning may violate applicable laws and terms of service. You are solely responsible for your use of this tool.
 - **Host Permissions (`<all_urls>`):** Required to allow the extension to run on any website you choose to audit.
 
 ## Third-Party Services

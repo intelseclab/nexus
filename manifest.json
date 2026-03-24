@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Nexus",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "IntelSecLab",
-  "description": "Web security reconnaissance. Detects exposed API keys, tokens, configs, tech stack, and probes sensitive paths for pentesters.",
+  "description": "Web recon platform. Detects exposed API keys, tokens, configs, tech stack, and probes sensitive paths.",
   "homepage_url": "https://github.com/intelseclab/nexus",
   "permissions": [
     "activeTab",

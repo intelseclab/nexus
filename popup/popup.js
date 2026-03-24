@@ -116,8 +116,37 @@
     "media": "Check if media URLs contain replayable tokens. Signed URLs may allow unauthorized access to premium content."
   };
 
+  // ── Disclaimer ──
+  function checkDisclaimer() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get("nexus_disclaimer_accepted", (data) => {
+        if (data.nexus_disclaimer_accepted) {
+          resolve(true);
+          return;
+        }
+        // Show disclaimer overlay
+        const overlay = document.getElementById("disclaimer-overlay");
+        const checkbox = document.getElementById("disclaimer-agree");
+        const acceptBtn = document.getElementById("disclaimer-accept");
+        if (!overlay || !checkbox || !acceptBtn) { resolve(true); return; }
+
+        overlay.style.display = "flex";
+        checkbox.addEventListener("change", () => {
+          acceptBtn.disabled = !checkbox.checked;
+        });
+        acceptBtn.addEventListener("click", () => {
+          chrome.storage.local.set({ nexus_disclaimer_accepted: true });
+          overlay.style.display = "none";
+          resolve(true);
+        });
+      });
+    });
+  }
+
   // ── Init ──
   async function init() {
+    await checkDisclaimer();
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) return;
 

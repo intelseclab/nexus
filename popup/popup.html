@@ -8,6 +8,30 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <!-- Disclaimer Overlay -->
+  <div class="disclaimer-overlay" id="disclaimer-overlay" style="display:none;">
+    <div class="disclaimer-box">
+      <div class="disclaimer-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+      <h2>Legal Disclaimer</h2>
+      <p>Nexus performs <strong>active reconnaissance</strong> including HTTP requests to sensitive paths on the target. This goes beyond passive analysis.</p>
+      <div class="disclaimer-rules">
+        <div class="disclaimer-rule ok"><i class="fa-solid fa-check"></i> Bug bounty targets you are authorized to test</div>
+        <div class="disclaimer-rule ok"><i class="fa-solid fa-check"></i> Your own websites and servers</div>
+        <div class="disclaimer-rule ok"><i class="fa-solid fa-check"></i> Pentest engagements with written permission</div>
+        <div class="disclaimer-rule ok"><i class="fa-solid fa-check"></i> CTF and lab environments</div>
+        <div class="disclaimer-rule bad"><i class="fa-solid fa-xmark"></i> Websites without explicit authorization</div>
+      </div>
+      <p class="disclaimer-warn">Unauthorized scanning may violate applicable laws (CFAA, Computer Misuse Act, etc.) and terms of service. You are solely responsible for your use of this tool.</p>
+      <label class="disclaimer-check">
+        <input type="checkbox" id="disclaimer-agree">
+        <span>I understand and will only scan authorized targets</span>
+      </label>
+      <button class="btn btn-scan disclaimer-btn" id="disclaimer-accept" disabled>
+        <i class="fa-solid fa-shield-halved"></i> Accept & Continue
+      </button>
+    </div>
+  </div>
+
   <div class="container">
     <!-- Header -->
     <header class="header">

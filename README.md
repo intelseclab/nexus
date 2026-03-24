@@ -38,6 +38,10 @@ This project uses vanilla JavaScript (no build step required).
 - `scanner/`: Core detection logic and patterns.
 - `popup/`: UI implementation.
 
+
+## LEGAL NOTICE:
+Nexus performs active reconnaissance including HTTP requests to sensitive paths on target websites. On first use, a legal disclaimer requires you to acknowledge that you will only scan targets you are authorized to test. Unauthorized scanning may violate applicable laws (CFAA, Computer Misuse Act, etc.) and terms of service. You are solely responsible for your use of this tool.
+
 ## Privacy Policy
 
 Nexus does **NOT** collect or transmit any user data. All scanning is performed locally within your browser.
